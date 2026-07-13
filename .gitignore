@@ -1,0 +1,20 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.ruff_cache/
+
+# Virtual environments
+.venv
+
+# direnv
+.direnv/
+
+# Source texts (copyrighted material, large binaries)
+texts/
+
+# Working directories created by lecturer contain their own
+# self-ignoring .gitignore, so they need no entries here.
