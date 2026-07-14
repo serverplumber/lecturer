@@ -10,12 +10,19 @@ weave them into the text as spoken digressions. TTS will start with
 - `lecturer.py` — the cement-based CLI: sets up the work directory and runs extraction.
 - `extraction/` — strategy-pattern extractors (epub, pdf) producing `Section`s of running
   text with `[^ref]`-anchored footnotes.
+- `redaction/` — redactional layers (`Redactor`s, applied in order) reworking the
+  extraction into a `Script` of `Utterance`s tagged with a delivery `Manner`, ready for
+  the TTS. Named for redaction criticism. Current layers: `SeamMender` (joins paragraphs
+  torn by page breaks) then `FootnoteWeaver` (weaves footnotes in as spoken digressions —
+  deterministic baseline; an LLM version is the planned hard part). Layers for language
+  tagging, maths dictation, and intonation are to come.
 - `texts/` — source monographs (gitignored; copyrighted material).
 - Working directories (e.g. `./eros_magic`) are created by the CLI wherever `-o` points
   (`-d` belongs to cement's `--debug`). Each contains a copy of the source document, a
   `working_text` symlink to it, a `sections/` directory of extracted text + footnotes
-  files, later intermediary pipeline files, and eventually the final audio. Each work dir
-  contains a self-ignoring `.gitignore`.
+  files, a `redactions/` directory of manner-tagged utterances (plus `.unwoven.txt`
+  leftovers), later intermediary pipeline files, and eventually the final audio. Each
+  work dir contains a self-ignoring `.gitignore`.
 
 ## Commands
 

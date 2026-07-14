@@ -11,6 +11,7 @@ from pathlib import Path
 from cement import App, Controller
 
 from extraction import Extraction, UnsupportedFormatError, extract
+from redaction import Manner, Script, redact
 
 WORKING_TEXT = "working_text"
 
@@ -19,6 +20,11 @@ def slugify(text: str) -> str:
     """Reduce a document name to a filesystem-friendly directory name."""
     slug = re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
     return slug or "document"
+
+
+def section_stem(index: int, title: str) -> str:
+    """The filename stem shared by a section's pipeline files."""
+    return f"{index:02d}_{slugify(title)[:48].rstrip('_')}"
 
 
 def prepare_workdir(document: Path, directory: Path) -> Path:
@@ -48,12 +54,33 @@ def write_sections(extraction: Extraction, directory: Path) -> Path:
     sections_dir = directory / "sections"
     sections_dir.mkdir(exist_ok=True)
     for index, section in enumerate(extraction.sections, start=1):
-        stem = f"{index:02d}_{slugify(section.title)[:48].rstrip('_')}"
+        stem = section_stem(index, section.title)
         (sections_dir / f"{stem}.txt").write_text(section.text + "\n")
         if section.footnotes:
             notes = "\n".join(f"[^{note.ref}]: {note.text}" for note in section.footnotes)
             (sections_dir / f"{stem}.footnotes.txt").write_text(notes + "\n")
     return sections_dir
+
+
+def write_redactions(script: Script, directory: Path) -> Path:
+    """Write each redacted section to ``redactions/NN_title.txt``.
+
+    Utterances are separated by blank lines, each opening with a ``[manner]``
+    tag line so later pipeline stages know how the stretch is delivered.
+    Notes no layer wove in are kept next door in ``.unwoven.txt`` files.
+    """
+    redactions_dir = directory / "redactions"
+    redactions_dir.mkdir(exist_ok=True)
+    for index, section in enumerate(script.sections, start=1):
+        stem = section_stem(index, section.title)
+        rendered = "\n\n".join(
+            f"[{utterance.manner}]\n{utterance.text}" for utterance in section.utterances
+        )
+        (redactions_dir / f"{stem}.txt").write_text(rendered + "\n")
+        if section.footnotes:
+            notes = "\n".join(f"[^{note.ref}]: {note.text}" for note in section.footnotes)
+            (redactions_dir / f"{stem}.unwoven.txt").write_text(notes + "\n")
+    return redactions_dir
 
 
 class Base(Controller):
@@ -103,6 +130,19 @@ class Base(Controller):
         notes = sum(len(section.footnotes) for section in extraction.sections)
         self.app.log.info(
             f"extracted {len(extraction.sections)} sections ({notes} footnotes) into {sections_dir}"
+        )
+
+        script = redact(extraction)
+        redactions_dir = write_redactions(script, directory)
+        digressions = sum(
+            utterance.manner is Manner.DIGRESSION
+            for section in script.sections
+            for utterance in section.utterances
+        )
+        unwoven = sum(len(section.footnotes) for section in script.sections)
+        self.app.log.info(
+            f"redacted into {redactions_dir}: {digressions} digressions woven, "
+            f"{unwoven} notes left unwoven"
         )
 
 
