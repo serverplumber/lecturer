@@ -26,9 +26,18 @@ from extraction.base import Extraction, Footnote, Section
 _PAGE_NUMBER = re.compile(r"^(?:\d+|[ivxlcdm]+)$", re.IGNORECASE)
 _HYPHEN_BREAK = re.compile(r"-\n(?=[a-z])")
 _SOFT_HYPHEN = re.compile(r"­\s*")
+# C0 controls and DEL, except tab and newline: text layers hide artefacts
+# like backspace between a running head and its page number.
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 _NOTE_START = re.compile(r"^(\d+)\.\s+(.*)", re.DOTALL)
 _FURNITURE_MAX_CHARS = 80
+# A short block recurring as the first or last block of a page (running
+# head, running foot) is furniture even when a short chapter keeps its
+# total count below the global threshold.
+_EDGE_THRESHOLD = 3
 _SUPERSCRIPT_FLAG = 1
+# How much larger than the body face a block must be set to read as a heading.
+_HEADING_MARGIN = 1.0
 
 
 @dataclass
@@ -67,12 +76,26 @@ def _assemble(
     notes: list[tuple[int, Footnote]] = []
     for page_number, blocks in enumerate(pages, start=1):
         paragraphs: list[str] = []
-        content = [b for b in blocks if not _is_page_furniture(_plain_text(b), furniture)]
+        # Heading-sized blocks are never furniture: a chapter heading often
+        # repeats verbatim as the running head of its own pages, and only
+        # the small-face copies should be dropped.
+        content = [
+            b
+            for b in blocks
+            if _is_heading(b, body_size) or not _is_page_furniture(_plain_text(b), furniture)
+        ]
+        content = _merge_wrapped_headings(content, body_size)
         note_flags = [_is_note_block(b, body_size, note_size) for b in content]
         # A page with nothing body-sized is not a footnote page: it is
         # front or back matter set in a small face (bibliographies
         # especially), which would otherwise parse as phantom notes.
-        if all(note_flags):
+        # Headings don't count as body here — a bibliography's own title
+        # must not turn its entries into notes.
+        if all(
+            flag
+            for block, flag in zip(content, note_flags, strict=True)
+            if not _is_heading(block, body_size)
+        ):
             note_flags = [False] * len(content)
         for block, is_note in zip(content, note_flags, strict=True):
             if is_note:
@@ -192,6 +215,31 @@ def _dominant_size(block: list[list[_Span]]) -> float:
     return weights.most_common(1)[0][0] if weights else 0.0
 
 
+def _is_heading(block: list[list[_Span]], body_size: float) -> bool:
+    return _dominant_size(block) > body_size + _HEADING_MARGIN
+
+
+def _merge_wrapped_headings(
+    blocks: list[list[list[_Span]]], body_size: float
+) -> list[list[list[_Span]]]:
+    """Rejoin headings the typesetting wraps into one block per line.
+
+    Consecutive blocks set in the same above-body face are one heading; a
+    different face, or any body text in between, starts afresh.
+    """
+    merged: list[list[list[_Span]]] = []
+    for block in blocks:
+        if (
+            merged
+            and _is_heading(block, body_size)
+            and _dominant_size(block) == _dominant_size(merged[-1])
+        ):
+            merged[-1] = merged[-1] + block
+        else:
+            merged.append(block)
+    return merged
+
+
 def _is_note_block(block: list[list[_Span]], body_size: float, note_size: float | None) -> bool:
     if note_size is None:
         return False
@@ -257,15 +305,25 @@ def _normalize(paragraph: str) -> str:
 
 
 def _furniture(pages: list[list[list[list[_Span]]]]) -> set[str]:
-    """Normalized forms of short blocks recurring on enough pages to be furniture."""
-    counts = Counter(
-        _normalize(text)
-        for blocks in pages
-        for text in {_plain_text(b) for b in blocks}
-        if text and len(text) <= _FURNITURE_MAX_CHARS
-    )
+    """Normalized forms of short blocks recurring on enough pages to be furniture.
+
+    Blocks are counted twice over: everywhere on the page against a
+    threshold scaled to the book, and at the page's edges (first and last
+    block — where running heads and feet live) against a low fixed one,
+    so the running heads of short chapters don't slip through.
+    """
+    counts: Counter[str] = Counter()
+    edges: Counter[str] = Counter()
+    for blocks in pages:
+        texts = [text for text in (_plain_text(b) for b in blocks) if text]
+        short = {text for text in texts if len(text) <= _FURNITURE_MAX_CHARS}
+        counts.update(_normalize(text) for text in short)
+        if texts:
+            edges.update(_normalize(text) for text in {texts[0], texts[-1]} & short)
     threshold = max(3, len(pages) // 20)
-    return {key for key, count in counts.items() if count >= threshold and key}
+    furniture = {key for key, count in counts.items() if count >= threshold and key}
+    furniture |= {key for key, count in edges.items() if count >= _EDGE_THRESHOLD and key}
+    return furniture
 
 
 def _is_page_furniture(paragraph: str, furniture: set[str]) -> bool:
@@ -276,5 +334,5 @@ def _is_page_furniture(paragraph: str, furniture: set[str]) -> bool:
 
 def _flatten(block: str) -> str:
     """Turn a block into one line, repairing hyphenation across line breaks."""
-    text = _SOFT_HYPHEN.sub("", block.strip())
+    text = _CONTROL.sub("", _SOFT_HYPHEN.sub("", block.strip()))
     return " ".join(_HYPHEN_BREAK.sub("", text).split())

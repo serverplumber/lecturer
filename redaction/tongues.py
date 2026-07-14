@@ -103,15 +103,24 @@ def _foreign_runs(text: str) -> list[tuple[int, int, str]]:
         lang = _char_lang(char)
         if lang is None:
             continue
-        if (
-            runs
-            and runs[-1][2] == lang
-            and all(gap in _CONNECTORS for gap in text[runs[-1][1] : position])
-        ):
+        if runs and runs[-1][2] == lang and _bridgeable(text[runs[-1][1] : position]):
             runs[-1][1] = position + 1
         else:
             runs.append([position, position + 1, lang])
     return [(start, end, lang) for start, end, lang in runs]
+
+
+def _bridgeable(gap: str) -> bool:
+    """Whether one stretch of foreign script continues across ``gap``.
+
+    Connectors always bridge. So do a couple of Latin letters flush
+    against foreign letters on both sides — a text-layer artefact where a
+    lookalike glyph stands in for the native one (a Latin ``t`` inside
+    ``γόητες``); a space-separated word between quotes never bridges.
+    """
+    if all(char in _CONNECTORS for char in gap):
+        return True
+    return len(gap) <= 2 and all(char.isalpha() for char in gap)
 
 
 def _char_lang(char: str) -> str | None:
