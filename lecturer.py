@@ -6,12 +6,13 @@ the source text, every intermediary file, and eventually the final audio.
 
 import re
 import shutil
+from collections import Counter
 from pathlib import Path
 
 from cement import App, Controller
 
 from extraction import Extraction, UnsupportedFormatError, extract
-from redaction import Manner, Script, redact
+from redaction import Script, redact
 
 WORKING_TEXT = "working_text"
 
@@ -65,16 +66,19 @@ def write_sections(extraction: Extraction, directory: Path) -> Path:
 def write_redactions(script: Script, directory: Path) -> Path:
     """Write each redacted section to ``redactions/NN_title.txt``.
 
-    Utterances are separated by blank lines, each opening with a ``[manner]``
-    tag line so later pipeline stages know how the stretch is delivered.
-    Notes no layer wove in are kept next door in ``.unwoven.txt`` files.
+    Utterances are separated by blank lines, each opening with a tag line —
+    ``[manner]``, or ``[manner lang=xx]`` away from the lecture's language —
+    so later pipeline stages know how the stretch is delivered. Notes no
+    layer wove in are kept next door in ``.unwoven.txt`` files.
     """
     redactions_dir = directory / "redactions"
     redactions_dir.mkdir(exist_ok=True)
     for index, section in enumerate(script.sections, start=1):
         stem = section_stem(index, section.title)
         rendered = "\n\n".join(
-            f"[{utterance.manner}]\n{utterance.text}" for utterance in section.utterances
+            f"[{utterance.manner}{'' if utterance.lang == 'en' else f' lang={utterance.lang}'}]"
+            f"\n{utterance.text}"
+            for utterance in section.utterances
         )
         (redactions_dir / f"{stem}.txt").write_text(rendered + "\n")
         if section.footnotes:
@@ -134,15 +138,18 @@ class Base(Controller):
 
         script = redact(extraction)
         redactions_dir = write_redactions(script, directory)
-        digressions = sum(
-            utterance.manner is Manner.DIGRESSION
+        unwoven = sum(len(section.footnotes) for section in script.sections)
+        digressions = notes - unwoven
+        tongues = Counter(
+            utterance.lang
             for section in script.sections
             for utterance in section.utterances
+            if utterance.lang != "en"
         )
-        unwoven = sum(len(section.footnotes) for section in script.sections)
+        spoken = ", ".join(f"{lang} ({count})" for lang, count in tongues.most_common())
         self.app.log.info(
             f"redacted into {redactions_dir}: {digressions} digressions woven, "
-            f"{unwoven} notes left unwoven"
+            f"{unwoven} notes left unwoven" + (f", other tongues: {spoken}" if tongues else "")
         )
 
 

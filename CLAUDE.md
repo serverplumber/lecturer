@@ -12,10 +12,12 @@ weave them into the text as spoken digressions. TTS will start with
   text with `[^ref]`-anchored footnotes.
 - `redaction/` — redactional layers (`Redactor`s, applied in order) reworking the
   extraction into a `Script` of `Utterance`s tagged with a delivery `Manner`, ready for
-  the TTS. Named for redaction criticism. Current layers: `SeamMender` (joins paragraphs
-  torn by page breaks) then `FootnoteWeaver` (weaves footnotes in as spoken digressions —
-  deterministic baseline; an LLM version is the planned hard part). Layers for language
-  tagging, maths dictation, and intonation are to come.
+  the TTS. Named for redaction criticism. Current layers, in order: `SeamMender` (joins
+  paragraphs torn by page breaks), `FootnoteWeaver` (weaves footnotes in as spoken
+  digressions — deterministic baseline; an LLM version is the planned hard part), and
+  `LanguageTagger` (splits utterances at writing-system boundaries and tags them, e.g.
+  `lang=grc`; Latin-alphabet language switches are left for the LLM). Layers for maths
+  dictation and intonation are to come.
 - `texts/` — source monographs (gitignored; copyrighted material).
 - Working directories (e.g. `./eros_magic`) are created by the CLI wherever `-o` points
   (`-d` belongs to cement's `--debug`). Each contains a copy of the source document, a

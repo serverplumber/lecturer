@@ -28,10 +28,15 @@ class Manner(StrEnum):
 
 @dataclass
 class Utterance:
-    """A stretch of the script delivered in one manner."""
+    """A stretch of the script delivered in one manner and one language.
+
+    ``lang`` is a BCP 47 / ISO 639 code; the default is the language the
+    lecture is held in.
+    """
 
     text: str
     manner: Manner = Manner.BODY
+    lang: str = "en"
 
 
 @dataclass

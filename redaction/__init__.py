@@ -3,6 +3,7 @@
 from extraction import Extraction
 from redaction.base import Manner, Redactor, Script, ScriptSection, Utterance
 from redaction.mend import SeamMender
+from redaction.tongues import LanguageTagger
 from redaction.weave import FootnoteWeaver
 
 __all__ = [
@@ -17,6 +18,7 @@ __all__ = [
 _LAYERS: list[Redactor] = [
     SeamMender(),
     FootnoteWeaver(),
+    LanguageTagger(),
 ]
 
 
