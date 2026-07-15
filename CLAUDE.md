@@ -26,6 +26,15 @@ weave them into the text as spoken digressions. TTS will start with
   gpt-oss). A faithfulness guard requires the returned body prose to reproduce the
   paragraph verbatim and in full; guarded or failed paragraphs fall back to the verbatim
   weave. Layers for maths dictation and intonation are to come.
+- `recitation/` — speaks the script (`--speak`): `Reciter` strategy protocol, one WAV per
+  section into the work dir's `audio/`. `KokoroReciter` runs Kokoro-82M via kokoro-onnx
+  (pure wheels, CPU ~4× realtime; model fetched once into `~/.cache/lecturer`). Text is
+  chunked at sentence boundaries under Kokoro's 510-phoneme batch limit (mid-sentence
+  splices sound like random commas). `--voice` takes a name or a weighted blend of style
+  vectors (default `af_kore+af_aoede`; af_heart/af_bella glottal-pause before
+  vowel-initial words — measure, don't trust ears alone). Non-English utterances are
+  skipped and counted. Planned: a cantillation layer repunctuating long comma-free
+  sentences so the model breathes at clause boundaries, not mid-phrase.
 - `texts/` — source monographs (gitignored; copyrighted material).
 - Working directories (e.g. `./eros_magic`) are created by the CLI wherever `-o` points
   (`-d` belongs to cement's `--debug`). Each contains a copy of the source document, a

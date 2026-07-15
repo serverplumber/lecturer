@@ -166,6 +166,35 @@ class Base(Controller):
                 },
             ),
             (
+                ["--speak"],
+                {
+                    "help": "synthesise the redacted script into audio/ with Kokoro "
+                    "(the model is fetched once into the user cache)",
+                    "action": "store_true",
+                    "dest": "speak",
+                },
+            ),
+            (
+                ["--voice"],
+                {
+                    "help": "Kokoro voice, or a blend like af_kore+af_aoede "
+                    "(weighted: af_kore:2+af_aoede:1)",
+                    "dest": "voice",
+                    "metavar": "VOICE",
+                    "default": "af_kore+af_aoede",
+                },
+            ),
+            (
+                ["--speed"],
+                {
+                    "help": "speech rate multiplier for the reciter (0.5-2.0)",
+                    "dest": "speed",
+                    "metavar": "FACTOR",
+                    "type": float,
+                    "default": 1.0,
+                },
+            ),
+            (
                 ["document"],
                 {
                     "help": "path to the monograph to read (epub, pdf, ...)",
@@ -252,6 +281,23 @@ class Base(Controller):
             f"redacted into {redactions_dir}: {spoken_notes}"
             + (f", other tongues: {spoken}" if tongues else "")
         )
+
+        if self.app.pargs.speak:
+            # Imported here so runs that stop at text never load onnxruntime.
+            from recitation import KokoroReciter, recite
+
+            reciter = KokoroReciter(
+                voice=self.app.pargs.voice,
+                speed=self.app.pargs.speed,
+                log=self.app.log.info,
+            )
+            audio_dir = recite(script, directory, reciter, stem=section_stem, log=self.app.log.info)
+            silenced = ", ".join(
+                f"{lang} ({count})" for lang, count in reciter.skipped.most_common()
+            )
+            self.app.log.info(
+                f"audio in {audio_dir}" + (f"; left unspoken: {silenced}" if silenced else "")
+            )
 
 
 class Lecturer(App):
