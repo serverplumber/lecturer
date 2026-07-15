@@ -15,6 +15,8 @@ same script stay inside the foreign stretch, while surrounding brackets
 and sentence punctuation stay with the host language.
 """
 
+import unicodedata
+
 from redaction.base import Script, ScriptSection, Utterance
 
 # Codepoint ranges per script, mapped to the language a scholarly monograph
@@ -97,11 +99,16 @@ def _absorb_crumbs(pieces: list[tuple[str, str]]) -> list[tuple[str, str]]:
 
 
 def _foreign_runs(text: str) -> list[tuple[int, int, str]]:
-    """Maximal (start, end, lang) stretches of foreign script in ``text``."""
+    """Maximal (start, end, lang) stretches of foreign script in ``text``.
+
+    Only letters open or extend a run: OCR of scanned books drops isolated
+    marks from foreign blocks into English words ("ex۞ted" for "existed"),
+    which must not become phantom one-character stretches.
+    """
     runs: list[list] = []
     for position, char in enumerate(text):
         lang = _char_lang(char)
-        if lang is None:
+        if lang is None or not char.isalpha():
             continue
         if runs and runs[-1][2] == lang and _bridgeable(text[runs[-1][1] : position]):
             runs[-1][1] = position + 1
@@ -113,12 +120,13 @@ def _foreign_runs(text: str) -> list[tuple[int, int, str]]:
 def _bridgeable(gap: str) -> bool:
     """Whether one stretch of foreign script continues across ``gap``.
 
-    Connectors always bridge. So do a couple of Latin letters flush
-    against foreign letters on both sides — a text-layer artefact where a
-    lookalike glyph stands in for the native one (a Latin ``t`` inside
-    ``γόητες``); a space-separated word between quotes never bridges.
+    Connectors and combining marks (vowel points, shadda) always bridge.
+    So do a couple of Latin letters flush against foreign letters on both
+    sides — a text-layer artefact where a lookalike glyph stands in for
+    the native one (a Latin ``t`` inside ``γόητες``); a space-separated
+    word between quotes never bridges.
     """
-    if all(char in _CONNECTORS for char in gap):
+    if all(char in _CONNECTORS or unicodedata.category(char) == "Mn" for char in gap):
         return True
     return len(gap) <= 2 and all(char.isalpha() for char in gap)
 

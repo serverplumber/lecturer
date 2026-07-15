@@ -29,6 +29,17 @@ _RELEASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-
 _MODEL = "kokoro-v1.0.onnx"
 _VOICES = "voices-v1.0.bin"
 
+# Languages Kokoro can actually speak, with the espeak code and the voice
+# that carries each: a tagged utterance in one of these switches voice
+# mid-lecture; anything else (grc, he, ar, ...) is skipped and counted.
+_TONGUES = {
+    "it": ("it", "if_sara"),
+    "fr": ("fr-fr", "ff_siwis"),
+    "es": ("es", "ef_dora"),
+    "pt": ("pt-br", "pf_dora"),
+    "hi": ("hi", "hf_alpha"),
+}
+
 # Kokoro synthesises at most 510 phonemes at a go; fed more, kokoro-onnx
 # splices batches at arbitrary word gaps, which lands mid-sentence in long
 # academic paragraphs and sounds like randomly sprinkled commas. We chunk at
@@ -78,15 +89,17 @@ class KokoroReciter:
         return (blend / total).astype(np.float32)
 
     def utter(self, utterance: Utterance) -> np.ndarray | None:
-        if utterance.lang != "en":
+        if utterance.lang == "en":
+            lang, voice = self._lang, self._voice
+        elif utterance.lang in _TONGUES:
+            lang, voice = _TONGUES[utterance.lang]
+        else:
             self.skipped[utterance.lang] += 1
             return None
         gap = np.zeros(int(_CHUNK_GAP * self.sample_rate), dtype=np.float32)
         pieces: list[np.ndarray] = []
         for chunk in _chunks(utterance.text):
-            samples, _rate = self._kokoro.create(
-                chunk, voice=self._voice, speed=self._speed, lang=self._lang
-            )
+            samples, _rate = self._kokoro.create(chunk, voice=voice, speed=self._speed, lang=lang)
             if pieces:
                 pieces.append(gap)
             pieces.append(samples)
