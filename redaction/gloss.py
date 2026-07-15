@@ -134,7 +134,7 @@ class Glossator:
         woven = self.provider.gloss(_SYSTEM, request)
         if woven is None or not _faithful(woven, paragraph):
             return None
-        return [piece.model_dump() for piece in woven.pieces]
+        return [piece.model_dump() for piece in woven.pieces if piece.text.strip()]
 
     def _key(self, paragraph: str, notes: dict[str, Footnote]) -> str:
         payload = json.dumps(
@@ -149,16 +149,19 @@ class Glossator:
 
 
 def _faithful(woven: WovenParagraph, paragraph: str) -> bool:
-    """True if every body piece is a verbatim stretch of the paragraph.
+    """True if the body pieces reproduce the whole paragraph, in order.
 
-    Comparison ignores whitespace runs and invisible typesetting characters,
-    nothing else: a model that paraphrased, trimmed, or "improved" the
-    author's prose fails here and the paragraph falls back to the
+    Joined back together, the body pieces must equal the anchor-stripped
+    paragraph — comparison ignores whitespace runs and invisible typesetting
+    characters, nothing else. A model that paraphrased, reordered, or
+    "improved" the prose fails, and so does one that quietly swallowed a
+    sentence (weaker local models drop whole stretches): the author's text
+    must survive verbatim and in full, or the paragraph falls back to the
     deterministic weave.
     """
     source = _collapse(ANCHOR.sub("", paragraph))
-    bodies = [piece for piece in woven.pieces if piece.manner == "body"]
-    return bool(bodies) and all(_collapse(piece.text) in source for piece in bodies)
+    bodies = [_collapse(piece.text) for piece in woven.pieces if piece.manner == "body"]
+    return " ".join(body for body in bodies if body) == source
 
 
 def _collapse(text: str) -> str:

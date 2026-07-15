@@ -12,7 +12,15 @@ from pathlib import Path
 from cement import App, Controller
 
 from extraction import Extraction, UnsupportedFormatError, extract
-from redaction import DEFAULT_MODELS, PROVIDERS, Glossator, GlossError, Script, redact
+from redaction import (
+    DEFAULT_MODELS,
+    PROVIDERS,
+    FootnoteWeaver,
+    Glossator,
+    GlossError,
+    Script,
+    redact,
+)
 
 WORKING_TEXT = "working_text"
 
@@ -104,11 +112,20 @@ class Base(Controller):
             (
                 ["--llm"],
                 {
-                    "help": "weave footnotes with the LLM glossator instead of the "
-                    "deterministic baseline (billed API calls; results are cached "
-                    "in the working directory)",
+                    "help": "weave footnotes in as spoken digressions with the LLM "
+                    "glossator instead of dropping them (billed API calls; results "
+                    "are cached in the working directory)",
                     "action": "store_true",
                     "dest": "llm",
+                },
+            ),
+            (
+                ["--verbatim-notes"],
+                {
+                    "help": "weave every footnote in verbatim at its anchor instead "
+                    "of dropping them (inspection mode; unpleasant listening)",
+                    "action": "store_true",
+                    "dest": "verbatim_notes",
                 },
             ),
             (
@@ -184,6 +201,8 @@ class Base(Controller):
         )
 
         weaver = None
+        if self.app.pargs.verbatim_notes:
+            weaver = FootnoteWeaver()
         if self.app.pargs.llm:
             model = self.app.pargs.model or DEFAULT_MODELS[self.app.pargs.provider]
             try:
@@ -207,7 +226,7 @@ class Base(Controller):
             self.app.log.error(f"glossing failed: {error} (finished paragraphs are cached)")
             self.app.exit_code = 1
             return
-        if weaver is not None:
+        if isinstance(weaver, Glossator):
             provider = weaver.provider
             if provider.input_tokens or provider.output_tokens:
                 self.app.log.info(
@@ -217,6 +236,11 @@ class Base(Controller):
         redactions_dir = write_redactions(script, directory)
         unwoven = sum(len(section.footnotes) for section in script.sections)
         digressions = notes - unwoven
+        spoken_notes = (
+            f"{digressions} digressions woven, {unwoven} notes left unwoven"
+            if weaver is not None
+            else f"all {notes} notes dropped"
+        )
         tongues = Counter(
             utterance.lang
             for section in script.sections
@@ -225,8 +249,8 @@ class Base(Controller):
         )
         spoken = ", ".join(f"{lang} ({count})" for lang, count in tongues.most_common())
         self.app.log.info(
-            f"redacted into {redactions_dir}: {digressions} digressions woven, "
-            f"{unwoven} notes left unwoven" + (f", other tongues: {spoken}" if tongues else "")
+            f"redacted into {redactions_dir}: {spoken_notes}"
+            + (f", other tongues: {spoken}" if tongues else "")
         )
 
 

@@ -18,7 +18,40 @@ _SENTENCE_END = re.compile(r"[.!?…][)\]\"'”’]*(?=\s|$)")  # noqa: RUF001
 _ENDS_SENTENCE = re.compile(r"[.!?…][)\]\"'”’]*$")  # noqa: RUF001
 
 
+class NoteDropper:
+    """Read the book plain: strip the anchors, speak none of the notes.
+
+    The default weaver. Without a model capable of respeaking notes as
+    asides, hearing nothing beats hearing bibliography read aloud — the
+    main text is written to stand on its own. Every note survives as a
+    leftover (the ``.unwoven.txt`` files) for inspection.
+    """
+
+    def redact(self, script: Script) -> Script:
+        return Script(
+            sections=[
+                ScriptSection(
+                    title=section.title,
+                    utterances=[
+                        Utterance(
+                            text=ANCHOR.sub("", utterance.text).strip(),
+                            manner=utterance.manner,
+                            lang=utterance.lang,
+                        )
+                        if utterance.manner is Manner.BODY
+                        else utterance
+                        for utterance in section.utterances
+                    ],
+                    footnotes=list(section.footnotes),
+                )
+                for section in script.sections
+            ]
+        )
+
+
 class FootnoteWeaver:
+    """Weave every note in verbatim at its anchor — an inspection mode."""
+
     def redact(self, script: Script) -> Script:
         return Script(sections=[_weave_section(section) for section in script.sections])
 

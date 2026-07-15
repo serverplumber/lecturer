@@ -98,8 +98,11 @@ class OpenAIProvider:
         api_key = os.environ.get("OPENAI_API_KEY")
         if api_key is None and base_url is not None:
             api_key = "unused"  # local servers accept anything
+        # A local server grinding through a reasoning model can legitimately
+        # take far longer per paragraph than the SDK's 10-minute default.
+        timeout = 3600.0 if base_url is not None else openai.NOT_GIVEN
         try:
-            self._client = openai.OpenAI(api_key=api_key, base_url=base_url)
+            self._client = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
         except openai.OpenAIError as error:
             raise GlossError(
                 "no OpenAI credentials: set OPENAI_API_KEY (or pass --base-url for a local server)"

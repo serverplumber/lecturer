@@ -15,15 +15,17 @@ weave them into the text as spoken digressions. TTS will start with
   the TTS. Named for redaction criticism. Current layers, in order: `SeamMender` (joins
   paragraphs torn by page breaks), a footnote weaver, and `LanguageTagger` (splits
   utterances at writing-system boundaries and tags them, e.g. `lang=grc`; Latin-alphabet
-  language switches are left for the LLM). The weaver is `FootnoteWeaver` (deterministic:
-  each note spoken verbatim at its anchor's sentence end) or, with `--llm`, `Glossator`
-  (one call per annotated paragraph: substantive notes respoken as asides, bare citations
-  dropped; write-through cache in the work dir's `gloss_cache.json`). The glossator calls
-  through `GlossProvider` adapters in `redaction/providers.py` — `--provider anthropic`
-  (default) or `openai`; local models run via the openai adapter with `--base-url`
-  pointed at any OpenAI-compatible server (Ollama etc.). A faithfulness guard rejects
-  responses whose body prose isn't verbatim; guarded or failed paragraphs fall back to
-  the deterministic weave. Layers for maths dictation and intonation are to come.
+  language switches are left for the LLM). The weaver is `NoteDropper` by default (read
+  the book plain — anchors stripped, no note spoken), `Glossator` with `--llm` (one call
+  per annotated paragraph: substantive notes respoken as asides, bare citations dropped;
+  write-through cache in the work dir's `gloss_cache.json`), or `FootnoteWeaver` with
+  `--verbatim-notes` (every note verbatim at its anchor — inspection mode). The glossator
+  calls through `GlossProvider` adapters in `redaction/providers.py` — `--provider
+  anthropic` (default) or `openai`; local models run via the openai adapter with
+  `--base-url` pointed at any OpenAI-compatible server (Ollama etc.; `--effort high` for
+  gpt-oss). A faithfulness guard requires the returned body prose to reproduce the
+  paragraph verbatim and in full; guarded or failed paragraphs fall back to the verbatim
+  weave. Layers for maths dictation and intonation are to come.
 - `texts/` — source monographs (gitignored; copyrighted material).
 - Working directories (e.g. `./eros_magic`) are created by the CLI wherever `-o` points
   (`-d` belongs to cement's `--debug`). Each contains a copy of the source document, a
