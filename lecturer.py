@@ -15,10 +15,12 @@ from extraction import Extraction, UnsupportedFormatError, extract
 from redaction import (
     DEFAULT_MODELS,
     PROVIDERS,
+    TAGGING_MODELS,
     FootnoteWeaver,
     Glossator,
-    GlossError,
+    ProviderError,
     Script,
+    TongueInterpreter,
     redact,
 )
 
@@ -117,6 +119,16 @@ class Base(Controller):
                     "are cached in the working directory)",
                     "action": "store_true",
                     "dest": "llm",
+                },
+            ),
+            (
+                ["--interpret"],
+                {
+                    "help": "tag Latin-alphabet language switches (loanwords, Latin "
+                    "phrases, names) with the LLM so the reciter pronounces them "
+                    "in their own language (cheap model by default; cached)",
+                    "action": "store_true",
+                    "dest": "interpret",
                 },
             ),
             (
@@ -230,38 +242,40 @@ class Base(Controller):
         )
 
         weaver = None
+        interpreter = None
         if self.app.pargs.verbatim_notes:
             weaver = FootnoteWeaver()
-        if self.app.pargs.llm:
-            model = self.app.pargs.model or DEFAULT_MODELS[self.app.pargs.provider]
-            try:
-                provider = PROVIDERS[self.app.pargs.provider](
-                    model=model,
-                    base_url=self.app.pargs.base_url,
-                    effort=self.app.pargs.effort,
-                )
-            except GlossError as error:
-                self.app.log.error(str(error))
-                self.app.exit_code = 1
-                return
-            weaver = Glossator(
-                provider=provider,
-                cache_path=directory / "gloss_cache.json",
-                log=self.app.log.info,
-            )
         try:
-            script = redact(extraction, weaver=weaver)
-        except GlossError as error:
+            if self.app.pargs.llm:
+                weaver = Glossator(
+                    provider=self._provider(DEFAULT_MODELS),
+                    cache_path=directory / "gloss_cache.json",
+                    log=self.app.log.info,
+                )
+            if self.app.pargs.interpret:
+                interpreter = TongueInterpreter(
+                    provider=self._provider(TAGGING_MODELS),
+                    cache_path=directory / "tongue_cache.json",
+                    log=self.app.log.info,
+                )
+        except ProviderError as error:
+            self.app.log.error(str(error))
+            self.app.exit_code = 1
+            return
+        try:
+            script = redact(extraction, weaver=weaver, interpreter=interpreter)
+        except ProviderError as error:
             self.app.log.error(f"glossing failed: {error} (finished paragraphs are cached)")
             self.app.exit_code = 1
             return
-        if isinstance(weaver, Glossator):
-            provider = weaver.provider
-            if provider.input_tokens or provider.output_tokens:
-                self.app.log.info(
-                    f"glossator used {provider.input_tokens} input + "
-                    f"{provider.output_tokens} output tokens on {provider.label}"
-                )
+        for name, layer in (("glossator", weaver), ("interpreter", interpreter)):
+            if isinstance(layer, Glossator | TongueInterpreter):
+                provider = layer.provider
+                if provider.input_tokens or provider.output_tokens:
+                    self.app.log.info(
+                        f"{name} used {provider.input_tokens} input + "
+                        f"{provider.output_tokens} output tokens on {provider.label}"
+                    )
         redactions_dir = write_redactions(script, directory)
         unwoven = sum(len(section.footnotes) for section in script.sections)
         digressions = notes - unwoven
@@ -298,6 +312,13 @@ class Base(Controller):
             self.app.log.info(
                 f"audio in {audio_dir}" + (f"; left unspoken: {silenced}" if silenced else "")
             )
+
+    def _provider(self, defaults):
+        return PROVIDERS[self.app.pargs.provider](
+            model=self.app.pargs.model or defaults[self.app.pargs.provider],
+            base_url=self.app.pargs.base_url,
+            effort=self.app.pargs.effort,
+        )
 
 
 class Lecturer(App):

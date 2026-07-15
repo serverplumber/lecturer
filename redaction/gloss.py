@@ -25,7 +25,7 @@ from pathlib import Path
 
 from extraction import Footnote
 from redaction.base import ANCHOR, Manner, Script, ScriptSection, Utterance
-from redaction.providers import GlossProvider, WovenParagraph
+from redaction.providers import Provider, WovenParagraph
 from redaction.weave import weave_utterance
 
 _SYSTEM = """\
@@ -66,7 +66,7 @@ class Glossator:
 
     def __init__(
         self,
-        provider: GlossProvider,
+        provider: Provider,
         cache_path: Path | None = None,
         log: Callable[[str], None] = lambda message: None,
     ) -> None:
@@ -131,7 +131,7 @@ class Glossator:
             "and drop the bibliographic apparatus. A purely bibliographic note "
             "produces no digression at all."
         )
-        woven = self.provider.gloss(_SYSTEM, request)
+        woven = self.provider.ask(_SYSTEM, request, WovenParagraph)
         if woven is None or not _faithful(woven, paragraph):
             return None
         return [piece.model_dump() for piece in woven.pieces if piece.text.strip()]

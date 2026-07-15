@@ -4,39 +4,49 @@ from extraction import Extraction
 from redaction.base import Manner, Redactor, Script, ScriptSection, Utterance
 from redaction.cantillation import Cantillator
 from redaction.gloss import Glossator
+from redaction.interpret import TongueInterpreter
 from redaction.mend import SeamMender
-from redaction.providers import DEFAULT_MODELS, PROVIDERS, GlossError
+from redaction.providers import DEFAULT_MODELS, PROVIDERS, TAGGING_MODELS, ProviderError
 from redaction.tongues import LanguageTagger
 from redaction.weave import FootnoteWeaver, NoteDropper
 
 __all__ = [
     "DEFAULT_MODELS",
     "PROVIDERS",
+    "TAGGING_MODELS",
     "Cantillator",
     "FootnoteWeaver",
-    "GlossError",
     "Glossator",
     "Manner",
     "NoteDropper",
+    "ProviderError",
     "Redactor",
     "Script",
     "ScriptSection",
+    "TongueInterpreter",
     "Utterance",
     "redact",
 ]
 
 
-def redact(extraction: Extraction, weaver: Redactor | None = None) -> Script:
+def redact(
+    extraction: Extraction,
+    weaver: Redactor | None = None,
+    interpreter: Redactor | None = None,
+) -> Script:
     """Apply every redactional layer, in order, to the extracted text.
 
     ``weaver`` replaces the default ``NoteDropper`` — pass a ``Glossator``
     to weave footnotes in with the LLM's judgement, or a ``FootnoteWeaver``
-    to weave them in verbatim for inspection.
+    to weave them in verbatim for inspection. ``interpreter`` (a
+    ``TongueInterpreter``) tags Latin-alphabet language switches after the
+    deterministic tagger has handled the writing systems.
     """
     layers: list[Redactor] = [
         SeamMender(),
         weaver or NoteDropper(),
         LanguageTagger(),
+        *([interpreter] if interpreter is not None else []),
         Cantillator(),
     ]
     script = Script.from_extraction(extraction)

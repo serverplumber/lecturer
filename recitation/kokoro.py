@@ -7,10 +7,10 @@ British). Not every voice can read this prose: af_heart and af_bella
 insert loud glottal pauses before vowel-initial words ("freelance —
 experts"); af_aoede, af_jessica, af_kore, and af_river measured clean.
 
-Utterances tagged with languages the voice cannot speak (the tagger's
-``grc``, ``he``, …) are declined and counted in ``skipped`` — until a
-transliteration or multilingual engine exists, those stretches stay
-silent.
+Tagged utterances in languages Kokoro was trained on switch to a native
+voice; Latin and Ancient Greek are spoken in the lecture's own voice with
+espeak's classical phonemes. Languages with no espeak path (``he``, ``ar``)
+are declined and counted in ``skipped``.
 """
 
 import os
@@ -29,15 +29,23 @@ _RELEASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-
 _MODEL = "kokoro-v1.0.onnx"
 _VOICES = "voices-v1.0.bin"
 
-# Languages Kokoro can actually speak, with the espeak code and the voice
-# that carries each: a tagged utterance in one of these switches voice
-# mid-lecture; anything else (grc, he, ar, ...) is skipped and counted.
-_TONGUES = {
+# Languages the reciter can speak, with the espeak code and the voice that
+# carries each. A named voice switches speaker mid-lecture (Kokoro trained
+# on these); ``None`` keeps the lecture's own voice and only switches the
+# phonemes, always towards how scholars actually read aloud: Latin through
+# Italian rules (ecclesiastical), Greek through Modern Greek values
+# (Reuchlinian — espeak's el reads polytonic natively and its phonemes sit
+# closer to Kokoro's training than reconstructed grc). Correct phonemes in
+# the lecturer's voice beat anglicisation or silence. Anything else (he,
+# ar, ...) is skipped and counted.
+_TONGUES: dict[str, tuple[str, str | None]] = {
     "it": ("it", "if_sara"),
     "fr": ("fr-fr", "ff_siwis"),
     "es": ("es", "ef_dora"),
     "pt": ("pt-br", "pf_dora"),
     "hi": ("hi", "hf_alpha"),
+    "la": ("it", None),
+    "grc": ("el", None),
 }
 
 # Kokoro synthesises at most 510 phonemes at a go; fed more, kokoro-onnx
@@ -47,6 +55,7 @@ _TONGUES = {
 # character on this corpus) and rejoin with a natural sentence gap.
 _CHUNK_CHARS = 380
 _CHUNK_GAP = 0.2  # seconds
+_GREEK_SCRIPT = re.compile(r"[\u0370-\u03ff\u1f00-\u1fff]")
 _SENTENCE = re.compile(r"[^.!?…]*(?:[.!?…]+[)\]\"'”’]*\s*|$)")  # noqa: RUF001
 _CLAUSE = re.compile(r"[^,;:]*(?:[,;:]\s*|$)")
 
@@ -93,6 +102,12 @@ class KokoroReciter:
             lang, voice = self._lang, self._voice
         elif utterance.lang in _TONGUES:
             lang, voice = _TONGUES[utterance.lang]
+            if utterance.lang == "grc" and not _GREEK_SCRIPT.search(utterance.text):
+                # a transliteration: el falls back to English on Latin script,
+                # so read it as the continental seminar does — Italian rules
+                lang = "it"
+            if voice is None:
+                voice = self._voice
         else:
             self.skipped[utterance.lang] += 1
             return None

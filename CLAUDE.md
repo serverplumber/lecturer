@@ -15,7 +15,10 @@ weave them into the text as spoken digressions. TTS will start with
   the TTS. Named for redaction criticism. Current layers, in order: `SeamMender` (joins
   paragraphs torn by page breaks), a footnote weaver, `LanguageTagger` (splits
   utterances at writing-system boundaries and tags them, e.g. `lang=grc`; Latin-alphabet
-  language switches are left for the LLM), and `Cantillator` (points overlong comma-free
+  language switches are left for `TongueInterpreter`), optionally `TongueInterpreter`
+  (`--interpret`: LLM-tags Latin-alphabet switches maximally — loanwords, Latin phrases,
+  transliterated Greek, source-form names; cheap model by default, `tongue_cache.json`
+  in the work dir), and `Cantillator` (points overlong comma-free
   stretches with breath commas at clause boundaries — unspoken, but the TTS breathes
   there instead of improvising a pause mid-phrase). The weaver is `NoteDropper` by default (read
   the book plain — anchors stripped, no note spoken), `Glossator` with `--llm` (one call
@@ -27,15 +30,17 @@ weave them into the text as spoken digressions. TTS will start with
   `--base-url` pointed at any OpenAI-compatible server (Ollama etc.; `--effort high` for
   gpt-oss). A faithfulness guard requires the returned body prose to reproduce the
   paragraph verbatim and in full; guarded or failed paragraphs fall back to the verbatim
-  weave. A maths-dictation layer and LLM language tagging are to come.
+  weave. A maths-dictation layer and a pronunciation lexicon are to come.
 - `recitation/` — speaks the script (`--speak`): `Reciter` strategy protocol, one WAV per
   section into the work dir's `audio/`. `KokoroReciter` runs Kokoro-82M via kokoro-onnx
   (pure wheels, CPU ~4× realtime; model fetched once into `~/.cache/lecturer`). Text is
   chunked at sentence boundaries under Kokoro's 510-phoneme batch limit (mid-sentence
   splices sound like random commas). `--voice` takes a name or a weighted blend of style
   vectors (default `af_kore+af_aoede`; af_heart/af_bella glottal-pause before
-  vowel-initial words — measure, don't trust ears alone). Non-English utterances are
-  skipped and counted.
+  vowel-initial words — measure, don't trust ears alone). Tagged languages Kokoro
+  was trained on switch to a native voice; Latin (Italian rules — ecclesiastical) and
+  Greek (Modern Greek values — Reuchlinian; transliterations via Italian) are spoken in
+  the lecture's own voice; the rest are skipped and counted.
 - `texts/` — source monographs (gitignored; copyrighted material).
 - Working directories (e.g. `./eros_magic`) are created by the CLI wherever `-o` points
   (`-d` belongs to cement's `--debug`). Each contains a copy of the source document, a
