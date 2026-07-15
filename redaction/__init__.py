@@ -2,6 +2,7 @@
 
 from extraction import Extraction
 from redaction.base import Manner, Redactor, Script, ScriptSection, Utterance
+from redaction.cantillation import Cantillator
 from redaction.gloss import Glossator
 from redaction.mend import SeamMender
 from redaction.providers import DEFAULT_MODELS, PROVIDERS, GlossError
@@ -11,6 +12,7 @@ from redaction.weave import FootnoteWeaver, NoteDropper
 __all__ = [
     "DEFAULT_MODELS",
     "PROVIDERS",
+    "Cantillator",
     "FootnoteWeaver",
     "GlossError",
     "Glossator",
@@ -31,7 +33,12 @@ def redact(extraction: Extraction, weaver: Redactor | None = None) -> Script:
     to weave footnotes in with the LLM's judgement, or a ``FootnoteWeaver``
     to weave them in verbatim for inspection.
     """
-    layers: list[Redactor] = [SeamMender(), weaver or NoteDropper(), LanguageTagger()]
+    layers: list[Redactor] = [
+        SeamMender(),
+        weaver or NoteDropper(),
+        LanguageTagger(),
+        Cantillator(),
+    ]
     script = Script.from_extraction(extraction)
     for layer in layers:
         script = layer.redact(script)

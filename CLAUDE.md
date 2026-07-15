@@ -13,9 +13,11 @@ weave them into the text as spoken digressions. TTS will start with
 - `redaction/` — redactional layers (`Redactor`s, applied in order) reworking the
   extraction into a `Script` of `Utterance`s tagged with a delivery `Manner`, ready for
   the TTS. Named for redaction criticism. Current layers, in order: `SeamMender` (joins
-  paragraphs torn by page breaks), a footnote weaver, and `LanguageTagger` (splits
+  paragraphs torn by page breaks), a footnote weaver, `LanguageTagger` (splits
   utterances at writing-system boundaries and tags them, e.g. `lang=grc`; Latin-alphabet
-  language switches are left for the LLM). The weaver is `NoteDropper` by default (read
+  language switches are left for the LLM), and `Cantillator` (points overlong comma-free
+  stretches with breath commas at clause boundaries — unspoken, but the TTS breathes
+  there instead of improvising a pause mid-phrase). The weaver is `NoteDropper` by default (read
   the book plain — anchors stripped, no note spoken), `Glossator` with `--llm` (one call
   per annotated paragraph: substantive notes respoken as asides, bare citations dropped;
   write-through cache in the work dir's `gloss_cache.json`), or `FootnoteWeaver` with
@@ -25,7 +27,7 @@ weave them into the text as spoken digressions. TTS will start with
   `--base-url` pointed at any OpenAI-compatible server (Ollama etc.; `--effort high` for
   gpt-oss). A faithfulness guard requires the returned body prose to reproduce the
   paragraph verbatim and in full; guarded or failed paragraphs fall back to the verbatim
-  weave. Layers for maths dictation and intonation are to come.
+  weave. A maths-dictation layer and LLM language tagging are to come.
 - `recitation/` — speaks the script (`--speak`): `Reciter` strategy protocol, one WAV per
   section into the work dir's `audio/`. `KokoroReciter` runs Kokoro-82M via kokoro-onnx
   (pure wheels, CPU ~4× realtime; model fetched once into `~/.cache/lecturer`). Text is
@@ -33,8 +35,7 @@ weave them into the text as spoken digressions. TTS will start with
   splices sound like random commas). `--voice` takes a name or a weighted blend of style
   vectors (default `af_kore+af_aoede`; af_heart/af_bella glottal-pause before
   vowel-initial words — measure, don't trust ears alone). Non-English utterances are
-  skipped and counted. Planned: a cantillation layer repunctuating long comma-free
-  sentences so the model breathes at clause boundaries, not mid-phrase.
+  skipped and counted.
 - `texts/` — source monographs (gitignored; copyrighted material).
 - Working directories (e.g. `./eros_magic`) are created by the CLI wherever `-o` points
   (`-d` belongs to cement's `--debug`). Each contains a copy of the source document, a
