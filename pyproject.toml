@@ -5,8 +5,10 @@ description = "Turn monographs into audiobooks that sound like the author lectur
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "anthropic>=0.116.0",
     "beautifulsoup4>=4.15.0",
     "cement>=3.0.14",
+    "openai>=2.45.0",
     "pymupdf>=1.28.0",
 ]
 

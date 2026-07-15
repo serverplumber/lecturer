@@ -12,7 +12,7 @@ from pathlib import Path
 from cement import App, Controller
 
 from extraction import Extraction, UnsupportedFormatError, extract
-from redaction import Script, redact
+from redaction import DEFAULT_MODELS, PROVIDERS, Glossator, GlossError, Script, redact
 
 WORKING_TEXT = "working_text"
 
@@ -102,6 +102,53 @@ class Base(Controller):
                 },
             ),
             (
+                ["--llm"],
+                {
+                    "help": "weave footnotes with the LLM glossator instead of the "
+                    "deterministic baseline (billed API calls; results are cached "
+                    "in the working directory)",
+                    "action": "store_true",
+                    "dest": "llm",
+                },
+            ),
+            (
+                ["--provider"],
+                {
+                    "help": "LLM provider for the glossator",
+                    "dest": "provider",
+                    "choices": sorted(PROVIDERS),
+                    "default": "anthropic",
+                },
+            ),
+            (
+                ["--model"],
+                {
+                    "help": "model for the LLM glossator (default per provider: "
+                    + ", ".join(f"{name} → {model}" for name, model in DEFAULT_MODELS.items()),
+                    "dest": "model",
+                    "metavar": "MODEL",
+                },
+            ),
+            (
+                ["--base-url"],
+                {
+                    "help": "OpenAI-compatible endpoint, for local models "
+                    "(e.g. http://localhost:11434/v1 for Ollama)",
+                    "dest": "base_url",
+                    "metavar": "URL",
+                },
+            ),
+            (
+                ["--effort"],
+                {
+                    "help": "reasoning effort for the glossator (low/medium/high; "
+                    "local reasoning models like gpt-oss need high to gloss "
+                    "rather than copy)",
+                    "dest": "effort",
+                    "metavar": "LEVEL",
+                },
+            ),
+            (
                 ["document"],
                 {
                     "help": "path to the monograph to read (epub, pdf, ...)",
@@ -136,7 +183,37 @@ class Base(Controller):
             f"extracted {len(extraction.sections)} sections ({notes} footnotes) into {sections_dir}"
         )
 
-        script = redact(extraction)
+        weaver = None
+        if self.app.pargs.llm:
+            model = self.app.pargs.model or DEFAULT_MODELS[self.app.pargs.provider]
+            try:
+                provider = PROVIDERS[self.app.pargs.provider](
+                    model=model,
+                    base_url=self.app.pargs.base_url,
+                    effort=self.app.pargs.effort,
+                )
+            except GlossError as error:
+                self.app.log.error(str(error))
+                self.app.exit_code = 1
+                return
+            weaver = Glossator(
+                provider=provider,
+                cache_path=directory / "gloss_cache.json",
+                log=self.app.log.info,
+            )
+        try:
+            script = redact(extraction, weaver=weaver)
+        except GlossError as error:
+            self.app.log.error(f"glossing failed: {error} (finished paragraphs are cached)")
+            self.app.exit_code = 1
+            return
+        if weaver is not None:
+            provider = weaver.provider
+            if provider.input_tokens or provider.output_tokens:
+                self.app.log.info(
+                    f"glossator used {provider.input_tokens} input + "
+                    f"{provider.output_tokens} output tokens on {provider.label}"
+                )
         redactions_dir = write_redactions(script, directory)
         unwoven = sum(len(section.footnotes) for section in script.sections)
         digressions = notes - unwoven

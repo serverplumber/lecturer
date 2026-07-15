@@ -29,14 +29,14 @@ def _weave_section(section: ScriptSection) -> ScriptSection:
     utterances: list[Utterance] = []
     for utterance in section.utterances:
         if utterance.manner is Manner.BODY:
-            utterances.extend(_weave_utterance(utterance, notes, woven))
+            utterances.extend(weave_utterance(utterance, notes, woven))
         else:
             utterances.append(utterance)
     leftovers = [note for ref, note in notes.items() if ref not in woven]
     return ScriptSection(title=section.title, utterances=utterances, footnotes=leftovers)
 
 
-def _weave_utterance(
+def weave_utterance(
     utterance: Utterance, notes: dict[str, Footnote], woven: set[str]
 ) -> list[Utterance]:
     """Split one body utterance around its anchors' sentence ends.
