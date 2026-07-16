@@ -73,16 +73,18 @@ def write_sections(extraction: Extraction, directory: Path) -> Path:
     return sections_dir
 
 
-def write_redactions(script: Script, directory: Path) -> Path:
-    """Write each redacted section to ``redactions/NN_title.txt``.
+def write_redactions(script: Script, directory: Path, variant: str) -> Path:
+    """Write each redacted section to ``redactions/<variant>/NN_title.txt``.
 
-    Utterances are separated by blank lines, each opening with a tag line —
-    ``[manner]``, or ``[manner lang=xx]`` away from the lecture's language —
-    so later pipeline stages know how the stretch is delivered. Notes no
-    layer wove in are kept next door in ``.unwoven.txt`` files.
+    Weaving variants fork the tree, mirroring ``audio/``: the plain book
+    and the glossed rendering live side by side. Utterances are separated
+    by blank lines, each opening with a tag line — ``[manner]``, or
+    ``[manner lang=xx]`` away from the lecture's language — so later
+    pipeline stages know how the stretch is delivered. Notes no layer wove
+    in are kept next door in ``.unwoven.txt`` files.
     """
-    redactions_dir = directory / "redactions"
-    redactions_dir.mkdir(exist_ok=True)
+    redactions_dir = directory / "redactions" / variant
+    redactions_dir.mkdir(parents=True, exist_ok=True)
     for index, section in enumerate(script.sections, start=1):
         stem = section_stem(index, section.title)
         rendered = "\n\n".join(
@@ -197,6 +199,25 @@ class Base(Controller):
                 },
             ),
             (
+                ["--publish"],
+                {
+                    "help": "bind recited sections into Opus files plus an M3U "
+                    "playlist (works on existing audio; ~10x smaller than wav)",
+                    "action": "store_true",
+                    "dest": "publish",
+                },
+            ),
+            (
+                ["--sections"],
+                {
+                    "help": "recite only sections whose title matches this regex "
+                    "(default: everything except apparatus — front matter, "
+                    "bibliography, index, ...)",
+                    "dest": "sections",
+                    "metavar": "REGEX",
+                },
+            ),
+            (
                 ["--speed"],
                 {
                     "help": "speech rate multiplier for the reciter (0.5-2.0)",
@@ -243,10 +264,13 @@ class Base(Controller):
 
         weaver = None
         interpreter = None
+        variant = "book"
         if self.app.pargs.verbatim_notes:
             weaver = FootnoteWeaver()
+            variant = "verbatim"
         try:
             if self.app.pargs.llm:
+                variant = "glossed"
                 weaver = Glossator(
                     provider=self._provider(DEFAULT_MODELS),
                     cache_path=directory / "gloss_cache.json",
@@ -276,7 +300,7 @@ class Base(Controller):
                         f"{name} used {provider.input_tokens} input + "
                         f"{provider.output_tokens} output tokens on {provider.label}"
                     )
-        redactions_dir = write_redactions(script, directory)
+        redactions_dir = write_redactions(script, directory, variant)
         unwoven = sum(len(section.footnotes) for section in script.sections)
         digressions = notes - unwoven
         spoken_notes = (
@@ -296,22 +320,49 @@ class Base(Controller):
             + (f", other tongues: {spoken}" if tongues else "")
         )
 
-        if self.app.pargs.speak:
+        if self.app.pargs.speak or self.app.pargs.publish:
             # Imported here so runs that stop at text never load onnxruntime.
-            from recitation import KokoroReciter, recite
+            from recitation import APPARATUS, KokoroReciter, publish, recite
 
+            if self.app.pargs.sections:
+                wanted = re.compile(self.app.pargs.sections, re.IGNORECASE)
+                skip = lambda title: not wanted.search(title)  # noqa: E731
+            else:
+                skip = lambda title: bool(APPARATUS.search(title))  # noqa: E731
+        if self.app.pargs.speak:
             reciter = KokoroReciter(
                 voice=self.app.pargs.voice,
                 speed=self.app.pargs.speed,
                 log=self.app.log.info,
             )
-            audio_dir = recite(script, directory, reciter, stem=section_stem, log=self.app.log.info)
+            audio_dir = recite(
+                script,
+                directory,
+                reciter,
+                stem=section_stem,
+                log=self.app.log.info,
+                skip=skip,
+                variant=variant,
+            )
             silenced = ", ".join(
                 f"{lang} ({count})" for lang, count in reciter.skipped.most_common()
             )
             self.app.log.info(
                 f"audio in {audio_dir}" + (f"; left unspoken: {silenced}" if silenced else "")
             )
+        if self.app.pargs.publish:
+            playlist = publish(
+                script,
+                directory,
+                stem=section_stem,
+                log=self.app.log.info,
+                skip=skip,
+                variant=variant,
+            )
+            if playlist is None:
+                self.app.log.warning("nothing to publish: no recited sections found")
+            else:
+                self.app.log.info(f"playlist ready: {playlist}")
 
     def _provider(self, defaults):
         return PROVIDERS[self.app.pargs.provider](

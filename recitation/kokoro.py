@@ -74,6 +74,7 @@ class KokoroReciter:
         model = _fetch(f"{_RELEASE}/{_MODEL}", cache / _MODEL, log)
         voices = _fetch(f"{_RELEASE}/{_VOICES}", cache / _VOICES, log)
         self._kokoro = Kokoro(str(model), str(voices))
+        self.fingerprint = f"kokoro:{voice}:{speed}"
         self._voice = self._style(voice)
         self._speed = speed
         self._lang = "en-gb" if voice.startswith("b") else "en-us"

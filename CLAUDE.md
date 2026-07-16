@@ -35,8 +35,12 @@ weave them into the text as spoken digressions. TTS will start with
   section into the work dir's `audio/`. `KokoroReciter` runs Kokoro-82M via kokoro-onnx
   (pure wheels, CPU ~4× realtime; model fetched once into `~/.cache/lecturer`). Text is
   chunked at sentence boundaries under Kokoro's 510-phoneme batch limit (mid-sentence
-  splices sound like random commas). `--voice` takes a name or a weighted blend of style
-  vectors (default `af_kore+af_aoede`; af_heart/af_bella glottal-pause before
+  splices sound like random commas). Apparatus sections (front matter, bibliography, index, ...)
+  are skipped by default — `--sections REGEX` chooses explicitly — and existing WAVs are
+  kept, so re-runs only synthesise what's missing. `--publish` binds the recited sections
+  into per-section Opus (~10x smaller, streamed through the soundfile wheel's libsndfile,
+  no ffmpeg) plus an `.m3u` playlist with section titles and durations. `--voice` takes a name or a weighted
+  blend of style vectors (default `af_kore+af_aoede`; af_heart/af_bella glottal-pause before
   vowel-initial words — measure, don't trust ears alone). Tagged languages Kokoro
   was trained on switch to a native voice; Latin (Italian rules — ecclesiastical) and
   Greek (Modern Greek values — Reuchlinian; transliterations via Italian) are spoken in
@@ -45,8 +49,15 @@ weave them into the text as spoken digressions. TTS will start with
 - Working directories (e.g. `./eros_magic`) are created by the CLI wherever `-o` points
   (`-d` belongs to cement's `--debug`). Each contains a copy of the source document, a
   `working_text` symlink to it, a `sections/` directory of extracted text + footnotes
-  files, a `redactions/` directory of manner-tagged utterances (plus `.unwoven.txt`
-  leftovers), later intermediary pipeline files, and eventually the final audio. Each
+  files, a `redactions/<variant>/` tree of manner-tagged utterances (plus
+  `.unwoven.txt` leftovers), forked per weaving like `audio/`, an `audio/<variant>/` tree of per-section WAVs, Opus files, and an `.m3u`
+  playlist per variant — the final audio. **Weaving variants fork the tree** and live
+  side by side: `book` (notes dropped), `glossed` (`--llm`), `verbatim`
+  (`--verbatim-notes`). Within a variant, reciter changes (voice, speed) overwrite:
+  each WAV's JSON `.sig` sidecar names the reciter and hashes the section's utterances,
+  so re-runs keep unchanged sections, re-synthesise stale ones, and `--publish` follows
+  via mtime; the playlist records the reciter in a comment. Text outputs (`sections/`,
+  `redactions/`) hold whatever the last run produced. Each
   work dir contains a self-ignoring `.gitignore`.
 
 ## Commands
