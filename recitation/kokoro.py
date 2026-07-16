@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 from kokoro_onnx import SAMPLE_RATE, Kokoro
 
+from recitation.lexicon import Lexicon
 from redaction import Utterance
 
 _RELEASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
@@ -68,8 +69,10 @@ class KokoroReciter:
         voice: str = "af_kore+af_aoede",
         speed: float = 1.0,
         cache_dir: Path | None = None,
+        lexicon: Lexicon | None = None,
         log: Callable[[str], None] = lambda message: None,
     ) -> None:
+        self._lexicon = lexicon
         cache = cache_dir or _default_cache()
         model = _fetch(f"{_RELEASE}/{_MODEL}", cache / _MODEL, log)
         voices = _fetch(f"{_RELEASE}/{_VOICES}", cache / _VOICES, log)
@@ -102,24 +105,59 @@ class KokoroReciter:
         if utterance.lang == "en":
             lang, voice = self._lang, self._voice
         elif utterance.lang in _TONGUES:
-            lang, voice = _TONGUES[utterance.lang]
-            if utterance.lang == "grc" and not _GREEK_SCRIPT.search(utterance.text):
-                # a transliteration: el falls back to English on Latin script,
-                # so read it as the continental seminar does — Italian rules
-                lang = "it"
-            if voice is None:
-                voice = self._voice
+            # transliteration-aware routing lives in _route (el falls back to
+            # English on Latin script, so those read by Italian rules)
+            lang = self._route(utterance.lang, utterance.text)
+            voice = _TONGUES[utterance.lang][1] or self._voice
         else:
             self.skipped[utterance.lang] += 1
             return None
         gap = np.zeros(int(_CHUNK_GAP * self.sample_rate), dtype=np.float32)
         pieces: list[np.ndarray] = []
         for chunk in _chunks(utterance.text):
-            samples, _rate = self._kokoro.create(chunk, voice=voice, speed=self._speed, lang=lang)
+            samples = self._synthesise(chunk, lang, voice)
             if pieces:
                 pieces.append(gap)
             pieces.append(samples)
         return np.concatenate(pieces) if pieces else None
+
+    def _synthesise(self, chunk: str, lang: str, voice) -> np.ndarray:
+        """One synthesis call, consulting the lexicon where it applies."""
+        pointed = self._lexicon.split(chunk) if self._lexicon is not None else None
+        if pointed is None:
+            samples, _rate = self._kokoro.create(chunk, voice=voice, speed=self._speed, lang=lang)
+            return samples
+        phonemes = " ".join(self._phonemes(text, entry, lang) for text, entry in pointed)
+        samples, _rate = self._kokoro.create(
+            phonemes, voice=voice, speed=self._speed, is_phonemes=True
+        )
+        return samples
+
+    def _phonemes(self, text: str, entry: dict | None, lang: str) -> str:
+        """Phonemize one lexicon piece by its mechanism."""
+        if entry is None:
+            return self._kokoro.tokenizer.phonemize(text, lang)
+        if "ipa" in entry:
+            return entry["ipa"]
+        if "as" in entry:
+            respelt = entry["as"]
+            route = "el" if _GREEK_SCRIPT.search(respelt) else lang
+            return self._kokoro.tokenizer.phonemize(respelt, route)
+        return self._kokoro.tokenizer.phonemize(text, self._route(entry["lang"], text))
+
+    def _route(self, lang: str, text: str) -> str:
+        """The espeak code a language tag resolves to, transliteration-aware."""
+        if lang == "en":
+            return self._lang
+        if lang in _TONGUES:
+            if lang == "grc" and not _GREEK_SCRIPT.search(text):
+                return "it"
+            return _TONGUES[lang][0]
+        return lang
+
+    def lexicon_digest(self, text: str) -> str:
+        """Hook for the audio signature — see ``recite``."""
+        return self._lexicon.digest_for(text) if self._lexicon is not None else ""
 
 
 def _chunks(text: str, budget: int = _CHUNK_CHARS) -> Iterator[str]:

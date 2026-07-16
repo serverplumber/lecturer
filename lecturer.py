@@ -199,6 +199,16 @@ class Base(Controller):
                 },
             ),
             (
+                ["--lexicon-draft"],
+                {
+                    "help": "sweep the book for pronunciation risks with the LLM "
+                    "and merge draft entries into the work dir's lexicon.json "
+                    "(existing entries are never overwritten)",
+                    "action": "store_true",
+                    "dest": "lexicon_draft",
+                },
+            ),
+            (
                 ["--publish"],
                 {
                     "help": "bind recited sections into Opus files plus an M3U "
@@ -320,9 +330,23 @@ class Base(Controller):
             + (f", other tongues: {spoken}" if tongues else "")
         )
 
+        if self.app.pargs.lexicon_draft:
+            from recitation import draft
+
+            try:
+                draft(
+                    script,
+                    self._provider(TAGGING_MODELS),
+                    directory / "lexicon.json",
+                    log=self.app.log.info,
+                )
+            except ProviderError as error:
+                self.app.log.error(f"lexicon draft failed: {error}")
+                self.app.exit_code = 1
+                return
         if self.app.pargs.speak or self.app.pargs.publish:
             # Imported here so runs that stop at text never load onnxruntime.
-            from recitation import APPARATUS, KokoroReciter, publish, recite
+            from recitation import APPARATUS, KokoroReciter, Lexicon, publish, recite
 
             if self.app.pargs.sections:
                 wanted = re.compile(self.app.pargs.sections, re.IGNORECASE)
@@ -330,9 +354,13 @@ class Base(Controller):
             else:
                 skip = lambda title: bool(APPARATUS.search(title))  # noqa: E731
         if self.app.pargs.speak:
+            lexicon = Lexicon.load(directory / "lexicon.json")
+            if lexicon is not None:
+                self.app.log.info(f"lexicon: {len(lexicon.entries)} pronunciation entries")
             reciter = KokoroReciter(
                 voice=self.app.pargs.voice,
                 speed=self.app.pargs.speed,
+                lexicon=lexicon,
                 log=self.app.log.info,
             )
             audio_dir = recite(

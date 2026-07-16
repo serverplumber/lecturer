@@ -30,7 +30,7 @@ weave them into the text as spoken digressions. TTS will start with
   `--base-url` pointed at any OpenAI-compatible server (Ollama etc.; `--effort high` for
   gpt-oss). A faithfulness guard requires the returned body prose to reproduce the
   paragraph verbatim and in full; guarded or failed paragraphs fall back to the verbatim
-  weave. A maths-dictation layer and a pronunciation lexicon are to come.
+  weave. A maths-dictation layer is to come.
 - `recitation/` — speaks the script (`--speak`): `Reciter` strategy protocol, one WAV per
   section into the work dir's `audio/`. `KokoroReciter` runs Kokoro-82M via kokoro-onnx
   (pure wheels, CPU ~4× realtime; model fetched once into `~/.cache/lecturer`). Text is
@@ -44,7 +44,12 @@ weave them into the text as spoken digressions. TTS will start with
   vowel-initial words — measure, don't trust ears alone). Tagged languages Kokoro
   was trained on switch to a native voice; Latin (Italian rules — ecclesiastical) and
   Greek (Modern Greek values — Reuchlinian; transliterations via Italian) are spoken in
-  the lecture's own voice; the rest are skipped and counted.
+  the lecture's own voice; the rest are skipped and counted. The work dir's `lexicon.json`
+  gives recurring names and terms their pronunciation (`recitation/lexicon.py`): `as`
+  respellings, `lang` reroutes, or exact `ipa`, applied at phoneme level;
+  `--lexicon-draft` seeds it with a cheap LLM sweep (never overwriting hand-edits), and
+  audio signatures include per-section lexicon digests so editing an entry re-renders
+  only the sections that use it.
 - `texts/` — source monographs (gitignored; copyrighted material).
 - Working directories (e.g. `./eros_magic`) are created by the CLI wherever `-o` points
   (`-d` belongs to cement's `--debug`). Each contains a copy of the source document, a

@@ -16,9 +16,10 @@ import numpy as np
 import soundfile
 
 from recitation.kokoro import KokoroReciter
+from recitation.lexicon import Lexicon, draft
 from redaction import Manner, Script, Utterance
 
-__all__ = ["APPARATUS", "KokoroReciter", "Reciter", "publish", "recite"]
+__all__ = ["APPARATUS", "KokoroReciter", "Lexicon", "Reciter", "draft", "publish", "recite"]
 
 # Sections that are scholarly apparatus, not lecture: nobody wants ninety
 # minutes of impeccably pronounced bibliography. The CLI skips titles
@@ -108,8 +109,12 @@ def _stamped(sig_path: Path) -> str | None:
 
 
 def _signature(section, reciter: Reciter) -> str:
+    # Reciters with a lexicon contribute the digest of the entries this
+    # section actually uses: editing an entry re-renders only its sections.
+    pointing = getattr(reciter, "lexicon_digest", None)
+    lexicon = pointing(" ".join(u.text for u in section.utterances)) if pointing else ""
     payload = json.dumps(
-        [reciter.fingerprint, *((u.text, u.manner, u.lang) for u in section.utterances)]
+        [reciter.fingerprint, lexicon, *((u.text, u.manner, u.lang) for u in section.utterances)]
     )
     return hashlib.sha256(payload.encode()).hexdigest()
 
