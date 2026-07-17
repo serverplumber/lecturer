@@ -37,9 +37,11 @@ weave them into the text as spoken digressions. TTS will start with
   chunked at sentence boundaries under Kokoro's 510-phoneme batch limit (mid-sentence
   splices sound like random commas). Apparatus sections (front matter, bibliography, index, ...)
   are skipped by default — `--sections REGEX` chooses explicitly — and existing WAVs are
-  kept, so re-runs only synthesise what's missing. `--publish` binds the recited sections
-  into per-section Opus (~10x smaller, streamed through the soundfile wheel's libsndfile,
-  no ffmpeg) plus an `.m3u` playlist with section titles and durations. `--voice` takes a name or a weighted
+  kept, so re-runs only synthesise what's missing. `publish` binds the recited sections into
+  per-section Opus (~10x smaller, streamed through the soundfile wheel's libsndfile)
+  plus an `.m3u` playlist with section titles and durations, and — when ffmpeg is on
+  PATH — a single chaptered `.m4b` audiobook per variant (the universal format; AirDrop
+  it to a phone and Books treats it right). `--voice` takes a name or a weighted
   blend of style vectors (default `af_kore+af_aoede`; af_heart/af_bella glottal-pause before
   vowel-initial words — measure, don't trust ears alone). Tagged languages Kokoro
   was trained on switch to a native voice; Latin (Italian rules — ecclesiastical) and

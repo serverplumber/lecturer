@@ -8,6 +8,8 @@ between utterances, and writes one WAV per section into ``audio/``.
 import hashlib
 import json
 import re
+import shutil
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
@@ -149,7 +151,7 @@ def publish(
     WAV. Returns the playlist path, or ``None`` if nothing was published.
     """
     audio_dir = directory / "audio" / variant
-    entries: list[tuple[str, float, str]] = []
+    entries: list[tuple[Path, float, str]] = []
     reciters: set[str] = set()
     for index, section in enumerate(script.sections, start=1):
         if skip(section.title):
@@ -164,7 +166,7 @@ def publish(
                 f"bound '{section.title}': "
                 f"{wav.stat().st_size >> 20} MB wav -> {opus.stat().st_size >> 20} MB opus"
             )
-        entries.append((opus.name, soundfile.info(wav).duration, section.title))
+        entries.append((wav, soundfile.info(wav).duration, section.title))
         if reciter := _reciter_of(wav.with_suffix(".sig")):
             reciters.add(reciter)
     if not entries:
@@ -172,14 +174,90 @@ def publish(
     playlist = audio_dir / f"{directory.resolve().name}_{variant}.m3u"
     lines = ["#EXTM3U"]
     lines += [f"# reciter: {reciter}" for reciter in sorted(reciters)]
-    for name, duration, title in entries:
+    for wav, duration, title in entries:
         # Many players parse EXTINF in the IPTV dialect, where the display
         # title starts after the LAST comma — a comma inside the title eats
         # everything before it. The low-nine lookalike is parser-safe.
         safe = title.replace(",", "‚")  # noqa: RUF001
-        lines += [f"#EXTINF:{round(duration)},{safe}", name]
+        lines += [f"#EXTINF:{round(duration)},{safe}", wav.with_suffix(".opus").name]
     playlist.write_text("\n".join(lines) + "\n")
+    _bind_m4b(entries, audio_dir, directory, variant, log)
     return playlist
+
+
+def _bind_m4b(
+    entries: list[tuple[Path, float, str]],
+    audio_dir: Path,
+    directory: Path,
+    variant: str,
+    log: Callable[[str], None],
+) -> None:
+    """One .m4b per variant — the universal audiobook: AAC with chapter atoms.
+
+    Needs ffmpeg; quietly skipped without it (the Opus + playlist remain).
+    Rebuilt only when a WAV is newer than the existing file.
+    """
+    if shutil.which("ffmpeg") is None:
+        log("no ffmpeg on PATH; skipping the .m4b audiobook")
+        return
+    book = audio_dir / f"{directory.resolve().name}_{variant}.m4b"
+    if book.exists() and all(book.stat().st_mtime >= wav.stat().st_mtime for wav, _, _ in entries):
+        return
+    concat = audio_dir / ".concat.txt"
+    # stems come from slugify, so no quote-escaping gymnastics needed
+    concat.write_text("".join(f"file '{wav.resolve().as_posix()}'\n" for wav, _, _ in entries))
+    metadata = [";FFMETADATA1", f"title={directory.resolve().name} ({variant})"]
+    position = 0.0
+    for _, duration, title in entries:
+        metadata += [
+            "[CHAPTER]",
+            "TIMEBASE=1/1000",
+            f"START={round(position * 1000)}",
+            f"END={round((position + duration) * 1000)}",
+            f"title={title}",
+        ]
+        position += duration
+    meta = audio_dir / ".chapters.txt"
+    meta.write_text("\n".join(metadata) + "\n")
+    partial = book.with_suffix(".m4b.part")
+    try:
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-loglevel",
+                "error",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(concat),
+                "-i",
+                str(meta),
+                "-map_metadata",
+                "1",
+                "-map",
+                "0:a",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "64k",
+                "-ac",
+                "1",
+                "-movflags",
+                "+faststart",
+                "-f",
+                "mp4",
+                str(partial),
+            ],
+            check=True,
+        )
+    finally:
+        concat.unlink(missing_ok=True)
+        meta.unlink(missing_ok=True)
+    partial.rename(book)
+    log(f"audiobook bound: {book.name} ({book.stat().st_size >> 20} MB, {len(entries)} chapters)")
 
 
 def _reciter_of(sig_path: Path) -> str | None:
