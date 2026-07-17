@@ -71,7 +71,12 @@ Everything routine is in the `justfile`:
 
 - `just setup` — `uv sync` + install pre-commit hooks (once after cloning).
 - `just lint` / `just fmt` / `just check` — ruff, same as the commit hooks run.
-- `just run -d <dir> <document>` — run the CLI.
+- `just run -o <dir>` — the whole chain to publish, default settings. The phases are
+  verbs — `extract` (takes the document; a different one prompts before rebuilding from
+  the top), `redact` (weaving + LLM flags), `recite` (`--variant/--voice/--speed/
+  --sections`), `publish`, and `draft-lexicon` (drafts pronunciation entries, then stops
+  for review). Verbs resolve their own dependencies: free phases run on demand, glossing
+  never runs implicitly.
 
 Use `uv` for all dependency management (`uv add`, `uv add --dev`), never pip. direnv
 activates the venv; `.envrc` runs `uv sync` on entry.

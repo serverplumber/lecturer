@@ -18,6 +18,7 @@ fmt:
 # Lint + format, same as the commit hooks
 check: lint fmt
 
-# Run lecturer, e.g. `just run -d eros_magic texts/some_book.epub`
+# Run lecturer, e.g. `just run extract -o eros_magic texts/some_book.epub`,
+# then `just run -o eros_magic` for the whole chain (see `just run --help` for verbs)
 run *args:
     uv run lecturer {{args}}

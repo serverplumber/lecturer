@@ -111,10 +111,17 @@ def _stamped(sig_path: Path) -> str | None:
 def _signature(section, reciter: Reciter) -> str:
     # Reciters with a lexicon contribute the digest of the entries this
     # section actually uses: editing an entry re-renders only its sections.
+    # The digest joins the payload only when non-empty, so signatures of
+    # lexicon-less audio stay stable across format evolution — a lesson
+    # bought with one unplanned re-synthesis of the introduction.
     pointing = getattr(reciter, "lexicon_digest", None)
     lexicon = pointing(" ".join(u.text for u in section.utterances)) if pointing else ""
     payload = json.dumps(
-        [reciter.fingerprint, lexicon, *((u.text, u.manner, u.lang) for u in section.utterances)]
+        [
+            reciter.fingerprint,
+            *([lexicon] if lexicon else []),
+            *((u.text, u.manner, u.lang) for u in section.utterances),
+        ]
     )
     return hashlib.sha256(payload.encode()).hexdigest()
 

@@ -1,9 +1,17 @@
 """Turn monographs into audiobooks read as though by the author.
 
-Point lecturer at a document and it sets up a working directory that holds
-the source text, every intermediary file, and eventually the final audio.
+The pipeline is four phases, each a verb reading the previous phase's
+files from the working directory: ``extract`` (document -> sections/),
+``redact`` (working_text -> redactions/<variant>/), ``recite``
+(redactions -> audio/<variant>/), and ``publish`` (audio -> Opus + an
+M3U playlist). Verbs resolve their own dependencies — free phases run
+on demand, billed ones never implicitly. ``draft-lexicon`` is a
+checkpoint: it drafts pronunciation entries and stops so they can be
+validated before recite. Run bare with just ``-o`` and the whole chain
+runs to publish with default settings.
 """
 
+import hashlib
 import re
 import shutil
 from collections import Counter
@@ -18,13 +26,83 @@ from redaction import (
     TAGGING_MODELS,
     FootnoteWeaver,
     Glossator,
+    Manner,
     ProviderError,
     Script,
+    ScriptSection,
     TongueInterpreter,
+    Utterance,
     redact,
 )
 
 WORKING_TEXT = "working_text"
+
+_OUTPUT_ARGUMENT = (
+    ["-o", "--output"],
+    {
+        "help": "the working directory (default: derived from the document name)",
+        "dest": "output",
+        "metavar": "DIR",
+    },
+)
+
+_VARIANT_ARGUMENT = (
+    ["--variant"],
+    {
+        "help": "which weaving to work from: book, glossed, or verbatim",
+        "dest": "variant",
+        "metavar": "NAME",
+        "default": "book",
+    },
+)
+
+_SECTIONS_ARGUMENT = (
+    ["--sections"],
+    {
+        "help": "only sections whose title matches this regex (default: everything "
+        "except apparatus — front matter, bibliography, index, ...)",
+        "dest": "sections",
+        "metavar": "REGEX",
+    },
+)
+
+_PROVIDER_ARGUMENTS = [
+    (
+        ["--provider"],
+        {
+            "help": "LLM provider",
+            "dest": "provider",
+            "choices": sorted(PROVIDERS),
+            "default": "anthropic",
+        },
+    ),
+    (
+        ["--model"],
+        {
+            "help": "model override (defaults per provider and task)",
+            "dest": "model",
+            "metavar": "MODEL",
+        },
+    ),
+    (
+        ["--base-url"],
+        {
+            "help": "OpenAI-compatible endpoint, for local models "
+            "(e.g. http://localhost:11434/v1 for Ollama)",
+            "dest": "base_url",
+            "metavar": "URL",
+        },
+    ),
+    (
+        ["--effort"],
+        {
+            "help": "reasoning effort (low/medium/high; local reasoning models "
+            "like gpt-oss need high)",
+            "dest": "effort",
+            "metavar": "LEVEL",
+        },
+    ),
+]
 
 
 def slugify(text: str) -> str:
@@ -36,6 +114,15 @@ def slugify(text: str) -> str:
 def section_stem(index: int, title: str) -> str:
     """The filename stem shared by a section's pipeline files."""
     return f"{index:02d}_{slugify(title)[:48].rstrip('_')}"
+
+
+def _digest(path: Path) -> str:
+    """Content hash of a document, streamed."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while block := handle.read(1 << 20):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def prepare_workdir(document: Path, directory: Path) -> Path:
@@ -73,15 +160,17 @@ def write_sections(extraction: Extraction, directory: Path) -> Path:
     return sections_dir
 
 
+_TAG = re.compile(r"^\[(\w+)(?: lang=([\w-]+))?\]$")
+
+
 def write_redactions(script: Script, directory: Path, variant: str) -> Path:
     """Write each redacted section to ``redactions/<variant>/NN_title.txt``.
 
-    Weaving variants fork the tree, mirroring ``audio/``: the plain book
-    and the glossed rendering live side by side. Utterances are separated
-    by blank lines, each opening with a tag line — ``[manner]``, or
-    ``[manner lang=xx]`` away from the lecture's language — so later
-    pipeline stages know how the stretch is delivered. Notes no layer wove
-    in are kept next door in ``.unwoven.txt`` files.
+    Weaving variants fork the tree, mirroring ``audio/``. Each file opens
+    with a ``[section] title`` header so later phases can read the script
+    back; utterances follow, separated by blank lines, each under a
+    ``[manner]`` or ``[manner lang=xx]`` tag line. Notes no layer wove in
+    are kept next door in ``.unwoven.txt`` files.
     """
     redactions_dir = directory / "redactions" / variant
     redactions_dir.mkdir(parents=True, exist_ok=True)
@@ -92,102 +181,208 @@ def write_redactions(script: Script, directory: Path, variant: str) -> Path:
             f"\n{utterance.text}"
             for utterance in section.utterances
         )
-        (redactions_dir / f"{stem}.txt").write_text(rendered + "\n")
+        (redactions_dir / f"{stem}.txt").write_text(f"[section] {section.title}\n\n{rendered}\n")
         if section.footnotes:
             notes = "\n".join(f"[^{note.ref}]: {note.text}" for note in section.footnotes)
             (redactions_dir / f"{stem}.unwoven.txt").write_text(notes + "\n")
     return redactions_dir
 
 
+def read_redactions(directory: Path, variant: str) -> Script | None:
+    """Read a redacted script back from ``redactions/<variant>/``.
+
+    The inverse of :func:`write_redactions` — this file tree is the
+    interface between the redaction and recitation phases. Returns
+    ``None`` when the variant has not been redacted yet.
+    """
+    redactions_dir = directory / "redactions" / variant
+    files = sorted(
+        path for path in redactions_dir.glob("*.txt") if not path.name.endswith(".unwoven.txt")
+    )
+    if not files:
+        return None
+    sections = []
+    for path in files:
+        blocks = path.read_text().split("\n\n")
+        if blocks[0].startswith("[section]"):
+            title = blocks[0].removeprefix("[section]").strip()
+        else:
+            title = path.stem  # pre-header files: slugified but serviceable
+        utterances = []
+        for block in blocks[1:]:
+            tag, _, text = block.partition("\n")
+            match = _TAG.match(tag.strip())
+            if match is None or not text.strip():
+                continue
+            utterances.append(
+                Utterance(
+                    text=text.strip(),
+                    manner=Manner(match.group(1)),
+                    lang=match.group(2) or "en",
+                )
+            )
+        sections.append(ScriptSection(title=title, utterances=utterances))
+    return Script(sections=sections)
+
+
 class Base(Controller):
     class Meta:
         label = "base"
-        description = "Turn monographs into audiobooks."
+        description = (
+            "Turn monographs into audiobooks. Bare `lecturer -o DIR` runs the "
+            "whole chain to publish with default settings; the verbs run one "
+            "phase each, reading the previous phase's files from the work dir."
+        )
+        arguments = [_OUTPUT_ARGUMENT]
+
+    def _default(self):
+        directory = Path(self.app.pargs.output) if self.app.pargs.output else None
+        if directory is None or not (directory / WORKING_TEXT).exists():
+            self.app.args.print_help()
+            if directory is not None:
+                self.app.log.error(
+                    f"no {WORKING_TEXT} in {directory}: run `lecturer extract -o "
+                    f"{directory} <document>` first"
+                )
+                self.app.exit_code = 1
+            return
+        extraction = _extract_phase(self.app, directory, None)
+        if extraction is None:
+            return
+        script = _redact_phase(self.app, directory, extraction, weaver=None, interpreter=None)
+        _recite_phase(self.app, directory, script, "book", skip=_apparatus_skip(None))
+        _publish_phase(self.app, directory, script, "book", skip=_apparatus_skip(None))
+
+
+class Extract(Controller):
+    class Meta:
+        label = "extract"
+        stacked_on = "base"
+        stacked_type = "nested"
+        help = "set up the work dir and extract sections/ from the document"
+        description = "Set up the working directory and extract the document into sections/."
         arguments = [
+            _OUTPUT_ARGUMENT,
             (
-                ["-o", "--output"],
+                ["document"],
                 {
-                    "help": "output directory for intermediary files and the final audio "
-                    "(default: derived from the document name)",
-                    "dest": "output",
-                    "metavar": "DIR",
+                    "help": "path to the monograph (epub, pdf, ...); optional when "
+                    "the work dir already has a working_text",
+                    "nargs": "?",
                 },
             ),
+        ]
+
+    def _default(self):
+        document = Path(self.app.pargs.document) if self.app.pargs.document else None
+        if document is None:
+            if self.app.pargs.output:
+                link = Path(self.app.pargs.output) / WORKING_TEXT
+                if link.exists():
+                    document = link.resolve()
+            if document is None:
+                self.app.args.print_help()
+                return
+        elif not document.is_file():
+            self.app.log.error(f"no such document: {document}")
+            self.app.exit_code = 1
+            return
+        directory = Path(self.app.pargs.output or slugify(document.stem))
+        if not _reconcile(self.app, document, directory):
+            return
+        _extract_phase(self.app, directory, document)
+
+
+class Redact(Controller):
+    class Meta:
+        label = "redact"
+        stacked_on = "base"
+        stacked_type = "nested"
+        help = "rework the extraction into redactions/<variant>/"
+        description = (
+            "Rework the extracted text, layer by layer, into a spoken script. "
+            "The weaver decides the variant: notes dropped (book, the default), "
+            "woven by the LLM glossator (--llm -> glossed), or verbatim "
+            "(--verbatim-notes -> verbatim)."
+        )
+        arguments = [
+            _OUTPUT_ARGUMENT,
             (
                 ["--llm"],
                 {
                     "help": "weave footnotes in as spoken digressions with the LLM "
-                    "glossator instead of dropping them (billed API calls; results "
-                    "are cached in the working directory)",
+                    "glossator (billed API calls; cached in the work dir)",
                     "action": "store_true",
                     "dest": "llm",
+                },
+            ),
+            (
+                ["--verbatim-notes"],
+                {
+                    "help": "weave every footnote in verbatim at its anchor "
+                    "(inspection mode; unpleasant listening)",
+                    "action": "store_true",
+                    "dest": "verbatim_notes",
                 },
             ),
             (
                 ["--interpret"],
                 {
                     "help": "tag Latin-alphabet language switches (loanwords, Latin "
-                    "phrases, names) with the LLM so the reciter pronounces them "
-                    "in their own language (cheap model by default; cached)",
+                    "phrases, names) with the LLM (cheap model by default; cached)",
                     "action": "store_true",
                     "dest": "interpret",
                 },
             ),
-            (
-                ["--verbatim-notes"],
-                {
-                    "help": "weave every footnote in verbatim at its anchor instead "
-                    "of dropping them (inspection mode; unpleasant listening)",
-                    "action": "store_true",
-                    "dest": "verbatim_notes",
-                },
-            ),
-            (
-                ["--provider"],
-                {
-                    "help": "LLM provider for the glossator",
-                    "dest": "provider",
-                    "choices": sorted(PROVIDERS),
-                    "default": "anthropic",
-                },
-            ),
-            (
-                ["--model"],
-                {
-                    "help": "model for the LLM glossator (default per provider: "
-                    + ", ".join(f"{name} → {model}" for name, model in DEFAULT_MODELS.items()),
-                    "dest": "model",
-                    "metavar": "MODEL",
-                },
-            ),
-            (
-                ["--base-url"],
-                {
-                    "help": "OpenAI-compatible endpoint, for local models "
-                    "(e.g. http://localhost:11434/v1 for Ollama)",
-                    "dest": "base_url",
-                    "metavar": "URL",
-                },
-            ),
-            (
-                ["--effort"],
-                {
-                    "help": "reasoning effort for the glossator (low/medium/high; "
-                    "local reasoning models like gpt-oss need high to gloss "
-                    "rather than copy)",
-                    "dest": "effort",
-                    "metavar": "LEVEL",
-                },
-            ),
-            (
-                ["--speak"],
-                {
-                    "help": "synthesise the redacted script into audio/ with Kokoro "
-                    "(the model is fetched once into the user cache)",
-                    "action": "store_true",
-                    "dest": "speak",
-                },
-            ),
+            *_PROVIDER_ARGUMENTS,
+        ]
+
+    def _default(self):
+        directory = _existing_workdir(self.app)
+        if directory is None:
+            return
+        extraction = _extract_phase(self.app, directory, None)
+        if extraction is None:
+            return
+        weaver = None
+        interpreter = None
+        if self.app.pargs.verbatim_notes:
+            weaver = FootnoteWeaver()
+        try:
+            if self.app.pargs.llm:
+                weaver = Glossator(
+                    provider=_provider(self.app, DEFAULT_MODELS),
+                    cache_path=directory / "gloss_cache.json",
+                    log=self.app.log.info,
+                )
+            if self.app.pargs.interpret:
+                interpreter = TongueInterpreter(
+                    provider=_provider(self.app, TAGGING_MODELS),
+                    cache_path=directory / "tongue_cache.json",
+                    log=self.app.log.info,
+                )
+        except ProviderError as error:
+            self.app.log.error(str(error))
+            self.app.exit_code = 1
+            return
+        _redact_phase(self.app, directory, extraction, weaver=weaver, interpreter=interpreter)
+
+
+class Recite(Controller):
+    class Meta:
+        label = "recite"
+        stacked_on = "base"
+        stacked_type = "nested"
+        help = "speak redactions/<variant>/ into audio/<variant>/"
+        description = (
+            "Synthesise the redacted script into one WAV per section with Kokoro. "
+            "Unchanged sections (by content signature) are kept; apparatus "
+            "sections are skipped unless --sections says otherwise."
+        )
+        arguments = [
+            _OUTPUT_ARGUMENT,
+            _VARIANT_ARGUMENT,
+            _SECTIONS_ARGUMENT,
             (
                 ["--voice"],
                 {
@@ -199,212 +394,296 @@ class Base(Controller):
                 },
             ),
             (
-                ["--lexicon-draft"],
-                {
-                    "help": "sweep the book for pronunciation risks with the LLM "
-                    "and merge draft entries into the work dir's lexicon.json "
-                    "(existing entries are never overwritten)",
-                    "action": "store_true",
-                    "dest": "lexicon_draft",
-                },
-            ),
-            (
-                ["--publish"],
-                {
-                    "help": "bind recited sections into Opus files plus an M3U "
-                    "playlist (works on existing audio; ~10x smaller than wav)",
-                    "action": "store_true",
-                    "dest": "publish",
-                },
-            ),
-            (
-                ["--sections"],
-                {
-                    "help": "recite only sections whose title matches this regex "
-                    "(default: everything except apparatus — front matter, "
-                    "bibliography, index, ...)",
-                    "dest": "sections",
-                    "metavar": "REGEX",
-                },
-            ),
-            (
                 ["--speed"],
                 {
-                    "help": "speech rate multiplier for the reciter (0.5-2.0)",
+                    "help": "speech rate multiplier (0.5-2.0)",
                     "dest": "speed",
                     "metavar": "FACTOR",
                     "type": float,
                     "default": 1.0,
                 },
             ),
-            (
-                ["document"],
-                {
-                    "help": "path to the monograph to read (epub, pdf, ...)",
-                    "nargs": "?",
-                },
-            ),
         ]
 
     def _default(self):
-        if self.app.pargs.document is None:
-            self.app.args.print_help()
+        directory = _existing_workdir(self.app)
+        if directory is None:
             return
-
-        document = Path(self.app.pargs.document)
-        if not document.is_file():
-            self.app.log.error(f"no such document: {document}")
-            self.app.exit_code = 1
+        script = _ensure_redactions(self.app, directory)
+        if script is None:
             return
-
-        directory = Path(self.app.pargs.output or slugify(document.stem))
-        copy = prepare_workdir(document, directory)
-        self.app.log.info(f"working directory ready: {directory}/{WORKING_TEXT}")
-
-        try:
-            extraction = extract(copy)
-        except UnsupportedFormatError as error:
-            self.app.log.warning(f"{error}; nothing extracted yet")
-            return
-        sections_dir = write_sections(extraction, directory)
-        notes = sum(len(section.footnotes) for section in extraction.sections)
-        self.app.log.info(
-            f"extracted {len(extraction.sections)} sections ({notes} footnotes) into {sections_dir}"
+        _recite_phase(
+            self.app,
+            directory,
+            script,
+            self.app.pargs.variant,
+            skip=_apparatus_skip(self.app.pargs.sections),
+            voice=self.app.pargs.voice,
+            speed=self.app.pargs.speed,
         )
 
-        weaver = None
-        interpreter = None
+
+class Publish(Controller):
+    class Meta:
+        label = "publish"
+        stacked_on = "base"
+        stacked_type = "nested"
+        help = "bind audio/<variant>/ into Opus plus an M3U playlist"
+        description = (
+            "Convert recited WAVs to Opus (~10x smaller) and write a playlist "
+            "with section titles and durations, in reading order."
+        )
+        arguments = [_OUTPUT_ARGUMENT, _VARIANT_ARGUMENT, _SECTIONS_ARGUMENT]
+
+    def _default(self):
+        directory = _existing_workdir(self.app)
+        if directory is None:
+            return
+        script = _ensure_redactions(self.app, directory)
+        if script is None:
+            return
+        variant = self.app.pargs.variant
+        skip = _apparatus_skip(self.app.pargs.sections)
+        if not any((directory / "audio" / variant).glob("*.wav")):
+            self.app.log.info(f"no {variant} audio yet; reciting first (default voice)")
+            _recite_phase(self.app, directory, script, variant, skip=skip)
+        _publish_phase(self.app, directory, script, variant, skip=skip)
+
+
+class DraftLexicon(Controller):
+    class Meta:
+        label = "draft-lexicon"
+        stacked_on = "base"
+        stacked_type = "nested"
+        help = "draft lexicon.json pronunciation entries, then stop for review"
+        description = (
+            "Sweep the redacted script for pronunciation risks with a cheap "
+            "model and merge draft entries into the work dir's lexicon.json — "
+            "then stop: validate the drafts by ear before recite/publish. "
+            "Existing entries are never overwritten. Redacts first if needed."
+        )
+        arguments = [_OUTPUT_ARGUMENT, _VARIANT_ARGUMENT, *_PROVIDER_ARGUMENTS]
+
+    def _default(self):
+        directory = _existing_workdir(self.app)
+        if directory is None:
+            return
+        script = _ensure_redactions(self.app, directory)
+        if script is None:
+            return
+        from recitation import draft
+
+        try:
+            draft(
+                script,
+                _provider(self.app, TAGGING_MODELS),
+                directory / "lexicon.json",
+                log=self.app.log.info,
+            )
+        except ProviderError as error:
+            self.app.log.error(f"lexicon draft failed: {error}")
+            self.app.exit_code = 1
+
+
+def _existing_workdir(app) -> Path | None:
+    """The work dir a phase verb operates on; errors if it isn't one yet."""
+    if not app.pargs.output:
+        app.args.print_help()
+        return None
+    directory = Path(app.pargs.output)
+    if not (directory / WORKING_TEXT).exists():
+        app.log.error(
+            f"no {WORKING_TEXT} in {directory}: run `lecturer extract -o "
+            f"{directory} <document>` first"
+        )
+        app.exit_code = 1
+        return None
+    return directory
+
+
+def _ensure_redactions(app, directory: Path) -> Script | None:
+    """The variant's script, redacting first when it doesn't exist yet.
+
+    Free deterministic variants (book, verbatim) are built on demand — the
+    deps do their magic. The glossed variant costs tokens and judgement,
+    so it is never built implicitly: run ``redact --llm`` yourself.
+    """
+    variant = getattr(app.pargs, "variant", "book")
+    script = read_redactions(directory, variant)
+    if script is not None:
+        return script
+    if variant == "glossed":
+        app.log.error(
+            f"no glossed redactions in {directory}, and glossing is never "
+            f"implicit (billed): run `lecturer redact -o {directory} --llm` first"
+        )
+        app.exit_code = 1
+        return None
+    app.log.info(f"no {variant} redactions yet; redacting first")
+    extraction = _extract_phase(app, directory, None)
+    if extraction is None:
+        return None
+    weaver = FootnoteWeaver() if variant == "verbatim" else None
+    return _redact_phase(app, directory, extraction, weaver=weaver, interpreter=None)
+
+
+def _reconcile(app, document: Path, directory: Path) -> bool:
+    """Guard the work dir's identity: one directory, one book.
+
+    A different document than the one behind ``working_text`` means taking
+    the whole process from the top — confirmed by the user, then the
+    derived trees are cleared. The document copy, caches, and the
+    hand-edited lexicon survive only for the same book.
+    """
+    link = directory / WORKING_TEXT
+    if not link.exists():
+        return True
+    existing = link.resolve()
+    if document.resolve() == existing or (
+        document.name == existing.name and _digest(document) == _digest(existing)
+    ):
+        return True
+    print(
+        f"{directory} currently holds '{existing.name}';\n"
+        f"replacing it with '{document.name}' rebuilds everything: "
+        "sections/, redactions/, and audio/ will be removed\n"
+        "(caches and lexicon.json are kept — delete them yourself if they "
+        "belong to the old book)."
+    )
+    try:
+        answer = input("take it from the top? [y/N] ")
+    except EOFError:
+        answer = ""
+    if answer.strip().lower() not in ("y", "yes"):
+        app.log.error("keeping the existing working text; nothing done")
+        app.exit_code = 1
+        return False
+    for derived in ("sections", "redactions", "audio"):
+        shutil.rmtree(directory / derived, ignore_errors=True)
+    existing.unlink(missing_ok=True)
+    link.unlink(missing_ok=True)
+    return True
+
+
+def _provider(app, defaults):
+    return PROVIDERS[app.pargs.provider](
+        model=app.pargs.model or defaults[app.pargs.provider],
+        base_url=app.pargs.base_url,
+        effort=app.pargs.effort,
+    )
+
+
+def _apparatus_skip(sections: str | None):
+    from recitation import APPARATUS
+
+    if sections:
+        wanted = re.compile(sections, re.IGNORECASE)
+        return lambda title: not wanted.search(title)
+    return lambda title: bool(APPARATUS.search(title))
+
+
+def _extract_phase(app, directory: Path, document: Path | None) -> Extraction | None:
+    document = document or (directory / WORKING_TEXT).resolve()
+    copy = prepare_workdir(document, directory)
+    app.log.info(f"working directory ready: {directory}/{WORKING_TEXT}")
+    try:
+        extraction = extract(copy)
+    except UnsupportedFormatError as error:
+        app.log.error(f"{error}; nothing extracted")
+        app.exit_code = 1
+        return None
+    sections_dir = write_sections(extraction, directory)
+    notes = sum(len(section.footnotes) for section in extraction.sections)
+    app.log.info(
+        f"extracted {len(extraction.sections)} sections ({notes} footnotes) into {sections_dir}"
+    )
+    return extraction
+
+
+def _redact_phase(app, directory: Path, extraction: Extraction, *, weaver, interpreter) -> Script:
+    if isinstance(weaver, Glossator):
+        variant = "glossed"
+    elif isinstance(weaver, FootnoteWeaver):
+        variant = "verbatim"
+    else:
         variant = "book"
-        if self.app.pargs.verbatim_notes:
-            weaver = FootnoteWeaver()
-            variant = "verbatim"
-        try:
-            if self.app.pargs.llm:
-                variant = "glossed"
-                weaver = Glossator(
-                    provider=self._provider(DEFAULT_MODELS),
-                    cache_path=directory / "gloss_cache.json",
-                    log=self.app.log.info,
+    try:
+        script = redact(extraction, weaver=weaver, interpreter=interpreter)
+    except ProviderError as error:
+        app.log.error(f"redaction failed: {error} (finished paragraphs are cached)")
+        app.exit_code = 1
+        raise SystemExit(app.exit_code) from error
+    redactions_dir = write_redactions(script, directory, variant)
+    notes = sum(len(section.footnotes) for section in extraction.sections)
+    unwoven = sum(len(section.footnotes) for section in script.sections)
+    spoken_notes = (
+        f"{notes - unwoven} digressions woven, {unwoven} notes left unwoven"
+        if weaver is not None
+        else f"all {notes} notes dropped"
+    )
+    tongues = Counter(
+        utterance.lang
+        for section in script.sections
+        for utterance in section.utterances
+        if utterance.lang != "en"
+    )
+    spoken = ", ".join(f"{lang} ({count})" for lang, count in tongues.most_common())
+    app.log.info(
+        f"redacted into {redactions_dir}: {spoken_notes}"
+        + (f", other tongues: {spoken}" if tongues else "")
+    )
+    for name, layer in (("glossator", weaver), ("interpreter", interpreter)):
+        if isinstance(layer, Glossator | TongueInterpreter):
+            provider = layer.provider
+            if provider.input_tokens or provider.output_tokens:
+                app.log.info(
+                    f"{name} used {provider.input_tokens} input + "
+                    f"{provider.output_tokens} output tokens on {provider.label}"
                 )
-            if self.app.pargs.interpret:
-                interpreter = TongueInterpreter(
-                    provider=self._provider(TAGGING_MODELS),
-                    cache_path=directory / "tongue_cache.json",
-                    log=self.app.log.info,
-                )
-        except ProviderError as error:
-            self.app.log.error(str(error))
-            self.app.exit_code = 1
-            return
-        try:
-            script = redact(extraction, weaver=weaver, interpreter=interpreter)
-        except ProviderError as error:
-            self.app.log.error(f"glossing failed: {error} (finished paragraphs are cached)")
-            self.app.exit_code = 1
-            return
-        for name, layer in (("glossator", weaver), ("interpreter", interpreter)):
-            if isinstance(layer, Glossator | TongueInterpreter):
-                provider = layer.provider
-                if provider.input_tokens or provider.output_tokens:
-                    self.app.log.info(
-                        f"{name} used {provider.input_tokens} input + "
-                        f"{provider.output_tokens} output tokens on {provider.label}"
-                    )
-        redactions_dir = write_redactions(script, directory, variant)
-        unwoven = sum(len(section.footnotes) for section in script.sections)
-        digressions = notes - unwoven
-        spoken_notes = (
-            f"{digressions} digressions woven, {unwoven} notes left unwoven"
-            if weaver is not None
-            else f"all {notes} notes dropped"
-        )
-        tongues = Counter(
-            utterance.lang
-            for section in script.sections
-            for utterance in section.utterances
-            if utterance.lang != "en"
-        )
-        spoken = ", ".join(f"{lang} ({count})" for lang, count in tongues.most_common())
-        self.app.log.info(
-            f"redacted into {redactions_dir}: {spoken_notes}"
-            + (f", other tongues: {spoken}" if tongues else "")
-        )
+    return script
 
-        if self.app.pargs.lexicon_draft:
-            from recitation import draft
 
-            try:
-                draft(
-                    script,
-                    self._provider(TAGGING_MODELS),
-                    directory / "lexicon.json",
-                    log=self.app.log.info,
-                )
-            except ProviderError as error:
-                self.app.log.error(f"lexicon draft failed: {error}")
-                self.app.exit_code = 1
-                return
-        if self.app.pargs.speak or self.app.pargs.publish:
-            # Imported here so runs that stop at text never load onnxruntime.
-            from recitation import APPARATUS, KokoroReciter, Lexicon, publish, recite
+def _recite_phase(
+    app,
+    directory: Path,
+    script: Script,
+    variant: str,
+    *,
+    skip,
+    voice: str = "af_kore+af_aoede",
+    speed: float = 1.0,
+):
+    # Imported here so runs that stop at text never load onnxruntime.
+    from recitation import KokoroReciter, Lexicon, recite
 
-            if self.app.pargs.sections:
-                wanted = re.compile(self.app.pargs.sections, re.IGNORECASE)
-                skip = lambda title: not wanted.search(title)  # noqa: E731
-            else:
-                skip = lambda title: bool(APPARATUS.search(title))  # noqa: E731
-        if self.app.pargs.speak:
-            lexicon = Lexicon.load(directory / "lexicon.json")
-            if lexicon is not None:
-                self.app.log.info(f"lexicon: {len(lexicon.entries)} pronunciation entries")
-            reciter = KokoroReciter(
-                voice=self.app.pargs.voice,
-                speed=self.app.pargs.speed,
-                lexicon=lexicon,
-                log=self.app.log.info,
-            )
-            audio_dir = recite(
-                script,
-                directory,
-                reciter,
-                stem=section_stem,
-                log=self.app.log.info,
-                skip=skip,
-                variant=variant,
-            )
-            silenced = ", ".join(
-                f"{lang} ({count})" for lang, count in reciter.skipped.most_common()
-            )
-            self.app.log.info(
-                f"audio in {audio_dir}" + (f"; left unspoken: {silenced}" if silenced else "")
-            )
-        if self.app.pargs.publish:
-            playlist = publish(
-                script,
-                directory,
-                stem=section_stem,
-                log=self.app.log.info,
-                skip=skip,
-                variant=variant,
-            )
-            if playlist is None:
-                self.app.log.warning("nothing to publish: no recited sections found")
-            else:
-                self.app.log.info(f"playlist ready: {playlist}")
+    lexicon = Lexicon.load(directory / "lexicon.json")
+    if lexicon is not None:
+        app.log.info(f"lexicon: {len(lexicon.entries)} pronunciation entries")
+    reciter = KokoroReciter(voice=voice, speed=speed, lexicon=lexicon, log=app.log.info)
+    audio_dir = recite(
+        script, directory, reciter, stem=section_stem, log=app.log.info, skip=skip, variant=variant
+    )
+    silenced = ", ".join(f"{lang} ({count})" for lang, count in reciter.skipped.most_common())
+    app.log.info(f"audio in {audio_dir}" + (f"; left unspoken: {silenced}" if silenced else ""))
 
-    def _provider(self, defaults):
-        return PROVIDERS[self.app.pargs.provider](
-            model=self.app.pargs.model or defaults[self.app.pargs.provider],
-            base_url=self.app.pargs.base_url,
-            effort=self.app.pargs.effort,
-        )
+
+def _publish_phase(app, directory: Path, script: Script, variant: str, *, skip):
+    from recitation import publish
+
+    playlist = publish(
+        script, directory, stem=section_stem, log=app.log.info, skip=skip, variant=variant
+    )
+    if playlist is None:
+        app.log.warning("nothing to publish: no recited sections found")
+    else:
+        app.log.info(f"playlist ready: {playlist}")
 
 
 class Lecturer(App):
     class Meta:
         label = "lecturer"
         base_controller = "base"
-        handlers = [Base]
+        handlers = [Base, Extract, Redact, Recite, Publish, DraftLexicon]
         exit_on_close = True
 
 
