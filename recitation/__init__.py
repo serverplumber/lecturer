@@ -173,7 +173,11 @@ def publish(
     lines = ["#EXTM3U"]
     lines += [f"# reciter: {reciter}" for reciter in sorted(reciters)]
     for name, duration, title in entries:
-        lines += [f"#EXTINF:{round(duration)},{title}", name]
+        # Many players parse EXTINF in the IPTV dialect, where the display
+        # title starts after the LAST comma — a comma inside the title eats
+        # everything before it. The low-nine lookalike is parser-safe.
+        safe = title.replace(",", "‚")  # noqa: RUF001
+        lines += [f"#EXTINF:{round(duration)},{safe}", name]
     playlist.write_text("\n".join(lines) + "\n")
     return playlist
 
