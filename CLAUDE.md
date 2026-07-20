@@ -13,7 +13,10 @@ weave them into the text as spoken digressions. TTS will start with
 - `redaction/` — redactional layers (`Redactor`s, applied in order) reworking the
   extraction into a `Script` of `Utterance`s tagged with a delivery `Manner`, ready for
   the TTS. Named for redaction criticism. Current layers, in order: `SeamMender` (joins
-  paragraphs torn by page breaks), a footnote weaver, `LanguageTagger` (splits
+  paragraphs torn by page breaks), a footnote weaver, `Elocutor` (speaks inline citation
+  abbreviations aloud instead of leaving them for the TTS to mangle — "1 Cor 2:10" →
+  "First Corinthians two, ten"; a list of `System`s in `redaction/elocution/`, one file
+  per abbreviation scheme, each tried in turn — see below), `LanguageTagger` (splits
   utterances at writing-system boundaries and tags them, e.g. `lang=grc`; Latin-alphabet
   language switches are left for `TongueInterpreter`), optionally `TongueInterpreter`
   (`--interpret`: LLM-tags Latin-alphabet switches maximally — loanwords, Latin phrases,
@@ -34,29 +37,48 @@ weave them into the text as spoken digressions. TTS will start with
   gpt-oss). A faithfulness guard requires the returned body prose to reproduce the
   paragraph verbatim and in full; guarded or failed paragraphs fall back to the verbatim
   weave.
-- Layers to come:
-  - **Citation dictation** — inline scholarly citations ("1 Cor 10:2–4", "Or. 32.9.6–10")
-    are author's-own-prose, not apparatus, so they can't be dropped like bare footnotes;
-    they need to be *spoken*, just not as written. A grep of `temple_gates/sections/`
-    shows the real corpus leans SBL biblical sigla (Rom, Cor, Gal, Hab, Thess) inline in
-    body text far more than classical ones. Shape agreed with the advisor: a new
-    `Redactor`, ordered after the weaver and before `LanguageTagger`/`Cantillator` (so
-    Cantillator sees the final expanded prose, and digressions get cleaned too) — not
-    folded into the lexicon (phoneme-level substitution, not word rewriting) and not
-    folded into `Glossator` (whose faithfulness guard requires body text verbatim; this
-    is the first layer allowed to rewrite the author's actual words). Recognition splits
-    in two: the numeric locator (siglum + multi-part number/range) is deterministic —
-    regex catch, mechanical range-speaking ("6–10" → "six to ten"); the siglum's spoken
-    form ("Or." → "Oration") is a per-document cheap-LLM draft sweep into a
-    hand-editable map, additive and never-overwrite, reusing the `--lexicon-draft`
-    *pattern* rather than the `Lexicon` class. Expand minimally — never resolve
-    author/work identity (that's exactly where a cheap model hallucinates; the
-    surrounding prose already supplies it) and drop book/chapter/section labels unless a
-    sample sounds wrong without them. Not a shared framework with maths dictation below;
-    build this concretely first, extract only if the two turn out to share structure.
-  - **Maths dictation** — "mm²/s" is exactly as hostile to TTS as a citation locator;
-    parked until citation dictation is built and either shares enough structure to
-    generalise or doesn't.
+- **Citation dictation**, in `redaction/elocution/` — inline scholarly citations
+  ("1 Cor 10:2–4", "Or. 32.9.6–10") are author's-own-prose, not apparatus, so they can't
+  be dropped like bare footnotes; they need to be *spoken*, just not as written. Not
+  folded into the lexicon (phoneme-level substitution, not word rewriting) and not folded
+  into `Glossator` (whose faithfulness guard requires body text verbatim; `Elocutor` is
+  the first layer allowed to rewrite the author's actual words). Plain regex throughout —
+  a parser generator would buy grammar (nesting, precedence) these flat locators never
+  need, and it can't fix cross-system siglum collisions either, since those are semantic,
+  not structural. `base.py` holds the engine (`System`, `mechanical_locator`, `Elocutor`);
+  one file per abbreviation scheme holds only its siglum table. Recognition splits in two:
+  the numeric locator (siglum + multi-part number/range) is mechanical — spelled out, with
+  book/chapter/section labels dropped ("6–10" → "six to ten"; a range dash may be a
+  hyphen, en dash, or true minus sign — this corpus's typesetting uses U+2212) — labels
+  come back only if a sample sounds wrong without them; the siglum's spoken form is each
+  system's own vocabulary.
+  `Elocutor` merges every system's sigla into **one combined regex pass**, not one
+  sequential pass per system: a separate pass per system would let a later, narrower
+  pattern's own scan claim a substring an earlier, wider citation should have owned whole
+  (biblical's "2 Cor" vs a bare classical "Cor." would turn "2 Cor. 3.18" into "2
+  Coriolanus three, eighteen" under naive sequential passes). One merged, longest-siglum-first
+  alternation lets the regex engine's own leftmost, non-overlapping scan settle that for
+  free. Sigla that are identical strings across systems ("Num" for Numbers vs.
+  Plutarch's *Numa*) can't be told apart by length; those tie-break by system priority —
+  earlier systems in `default_systems()` win. A real ambiguous case (a corpus citing both
+  under the bare siglum) is the one thing this can't resolve — that needs context, which
+  is exactly the boundary the LLM-drafted systems below are meant to live behind, not
+  cross.
+  - `biblical.py` — the SBL Handbook's book sigla: closed, universal, hardcoded, no draft
+    needed.
+  - `classical.py` — the heterogeneous Latin author-work abbreviations ("Or." → "Oration",
+    "Ann." → "Annals", ...). Open-vocabulary, so the real table wants a per-document
+    cheap-LLM draft sweep into a hand-editable map, additive and never-overwrite, reusing
+    the `--lexicon-draft` *pattern* rather than the `Lexicon` class — **not built yet**.
+    Currently holds one hand-verified seed entry, added for a real collision rather than
+    drafted: "Num" for Plutarch's *Numa*, listed before biblical in `default_systems()` so
+    it wins that tie. Expand minimally once the draft sweep lands — never resolve
+    author/work identity (exactly where a cheap model hallucinates; the surrounding prose
+    already supplies it).
+  - **Still to come**: Bekker numbering, Diels-Kranz, and Stephanus pagination are further
+    open-vocabulary systems of the same shape once they show up outside footnotes. Units
+    (SAE vs SI collisions) are parked until citation dictation's systems are mature enough
+    to tell whether the same machinery generalises or the two need separate treatment.
 - `recitation/` — speaks the script (`--speak`): `Reciter` strategy protocol, one WAV per
   section into the work dir's `audio/`. `KokoroReciter` runs Kokoro-82M via kokoro-onnx
   (pure wheels, CPU ~4× realtime; model fetched once into `~/.cache/lecturer`). Text is
