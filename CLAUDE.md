@@ -28,12 +28,35 @@ weave them into the text as spoken digressions. TTS will start with
   respoken as asides, bare citations dropped; write-through cache in `gloss_cache.json`,
   keyed by paragraph inputs only so context refinements never invalidate finished work), or `FootnoteWeaver` with
   `--verbatim-notes` (every note verbatim at its anchor — inspection mode). The glossator
-  calls through `GlossProvider` adapters in `redaction/providers.py` — `--provider
+  calls through `Provider` adapters in `redaction/providers.py` — `--provider
   anthropic` (default) or `openai`; local models run via the openai adapter with
   `--base-url` pointed at any OpenAI-compatible server (Ollama etc.; `--effort high` for
   gpt-oss). A faithfulness guard requires the returned body prose to reproduce the
   paragraph verbatim and in full; guarded or failed paragraphs fall back to the verbatim
-  weave. Layers to come: maths dictation, and classical-citation speech — "Or. 32.9.6–10" is a unit system as hostile to TTS as mm²/s; possibly deterministic (the standard abbreviation lists), possibly lexicon + cheap LLM.
+  weave.
+- Layers to come:
+  - **Citation dictation** — inline scholarly citations ("1 Cor 10:2–4", "Or. 32.9.6–10")
+    are author's-own-prose, not apparatus, so they can't be dropped like bare footnotes;
+    they need to be *spoken*, just not as written. A grep of `temple_gates/sections/`
+    shows the real corpus leans SBL biblical sigla (Rom, Cor, Gal, Hab, Thess) inline in
+    body text far more than classical ones. Shape agreed with the advisor: a new
+    `Redactor`, ordered after the weaver and before `LanguageTagger`/`Cantillator` (so
+    Cantillator sees the final expanded prose, and digressions get cleaned too) — not
+    folded into the lexicon (phoneme-level substitution, not word rewriting) and not
+    folded into `Glossator` (whose faithfulness guard requires body text verbatim; this
+    is the first layer allowed to rewrite the author's actual words). Recognition splits
+    in two: the numeric locator (siglum + multi-part number/range) is deterministic —
+    regex catch, mechanical range-speaking ("6–10" → "six to ten"); the siglum's spoken
+    form ("Or." → "Oration") is a per-document cheap-LLM draft sweep into a
+    hand-editable map, additive and never-overwrite, reusing the `--lexicon-draft`
+    *pattern* rather than the `Lexicon` class. Expand minimally — never resolve
+    author/work identity (that's exactly where a cheap model hallucinates; the
+    surrounding prose already supplies it) and drop book/chapter/section labels unless a
+    sample sounds wrong without them. Not a shared framework with maths dictation below;
+    build this concretely first, extract only if the two turn out to share structure.
+  - **Maths dictation** — "mm²/s" is exactly as hostile to TTS as a citation locator;
+    parked until citation dictation is built and either shares enough structure to
+    generalise or doesn't.
 - `recitation/` — speaks the script (`--speak`): `Reciter` strategy protocol, one WAV per
   section into the work dir's `audio/`. `KokoroReciter` runs Kokoro-82M via kokoro-onnx
   (pure wheels, CPU ~4× realtime; model fetched once into `~/.cache/lecturer`). Text is
