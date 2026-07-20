@@ -43,14 +43,19 @@ class Provider(Protocol):
     pydantic schema the answer must parse into (``None`` when the model
     produced nothing usable). Any redactional layer can bring its own
     schema — the glossator asks for woven paragraphs, the interpreter of
-    tongues for language switches.
+    tongues for language switches. ``context`` is a byte-stable prefix
+    (synopsis + chapter) placed under a cache breakpoint: sequential calls
+    sharing it pay ~0.1x for the cached span on Anthropic, and prefix
+    reuse comes free on OpenAI and local servers.
     """
 
     label: str
     input_tokens: int
     output_tokens: int
 
-    def ask(self, system: str, request: str, schema: type[Schema]) -> Schema | None: ...
+    def ask(
+        self, system: str, request: str, schema: type[Schema], context: str | None = None
+    ) -> Schema | None: ...
 
 
 class AnthropicProvider:
@@ -62,14 +67,23 @@ class AnthropicProvider:
         self._effort = effort
         self._client = anthropic.Anthropic(**({"base_url": base_url} if base_url else {}))
 
-    def ask(self, system: str, request: str, schema: type[Schema]) -> Schema | None:
+    def ask(
+        self, system: str, request: str, schema: type[Schema], context: str | None = None
+    ) -> Schema | None:
         extra = {"output_config": {"effort": self._effort}} if self._effort else {}
+        if context is None:
+            prompt = system
+        else:
+            prompt = [
+                {"type": "text", "text": system},
+                {"type": "text", "text": context, "cache_control": {"type": "ephemeral"}},
+            ]
         try:
             response = self._client.messages.parse(
                 model=self._model,
                 max_tokens=8000,
                 thinking={"type": "adaptive"},
-                system=system,
+                system=prompt,
                 messages=[{"role": "user", "content": request}],
                 output_format=schema,
                 **extra,
@@ -119,13 +133,16 @@ class OpenAIProvider:
                 "no OpenAI credentials: set OPENAI_API_KEY (or pass --base-url for a local server)"
             ) from error
 
-    def ask(self, system: str, request: str, schema: type[Schema]) -> Schema | None:
+    def ask(
+        self, system: str, request: str, schema: type[Schema], context: str | None = None
+    ) -> Schema | None:
         extra = {"reasoning_effort": self._effort} if self._effort else {}
+        prompt = system if context is None else f"{system}\n\n{context}"
         try:
             completion = self._client.chat.completions.parse(
                 model=self._model,
                 messages=[
-                    {"role": "system", "content": system},
+                    {"role": "system", "content": prompt},
                     {"role": "user", "content": request},
                 ],
                 response_format=schema,

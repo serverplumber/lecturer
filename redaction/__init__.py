@@ -3,7 +3,7 @@
 from extraction import Extraction
 from redaction.base import Manner, Redactor, Script, ScriptSection, Utterance
 from redaction.cantillation import Cantillator
-from redaction.gloss import Glossator
+from redaction.gloss import Glossator, ensure_synopsis
 from redaction.interpret import TongueInterpreter
 from redaction.mend import SeamMender
 from redaction.providers import DEFAULT_MODELS, PROVIDERS, TAGGING_MODELS, ProviderError
@@ -25,6 +25,7 @@ __all__ = [
     "ScriptSection",
     "TongueInterpreter",
     "Utterance",
+    "ensure_synopsis",
     "redact",
 ]
 

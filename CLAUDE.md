@@ -22,15 +22,18 @@ weave them into the text as spoken digressions. TTS will start with
   stretches with breath commas at clause boundaries — unspoken, but the TTS breathes
   there instead of improvising a pause mid-phrase). The weaver is `NoteDropper` by default (read
   the book plain — anchors stripped, no note spoken), `Glossator` with `--llm` (one call
-  per annotated paragraph: substantive notes respoken as asides, bare citations dropped;
-  write-through cache in the work dir's `gloss_cache.json`), or `FootnoteWeaver` with
+  per annotated paragraph, prefixed by a cache-stable context — the work dir's
+  `synopsis.txt` (drafted once by the glossator's model, then hand-editable, never
+  regenerated) plus the full current chapter under a cache breakpoint; substantive notes
+  respoken as asides, bare citations dropped; write-through cache in `gloss_cache.json`,
+  keyed by paragraph inputs only so context refinements never invalidate finished work), or `FootnoteWeaver` with
   `--verbatim-notes` (every note verbatim at its anchor — inspection mode). The glossator
   calls through `GlossProvider` adapters in `redaction/providers.py` — `--provider
   anthropic` (default) or `openai`; local models run via the openai adapter with
   `--base-url` pointed at any OpenAI-compatible server (Ollama etc.; `--effort high` for
   gpt-oss). A faithfulness guard requires the returned body prose to reproduce the
   paragraph verbatim and in full; guarded or failed paragraphs fall back to the verbatim
-  weave. A maths-dictation layer is to come.
+  weave. Layers to come: maths dictation, and classical-citation speech — "Or. 32.9.6–10" is a unit system as hostile to TTS as mm²/s; possibly deterministic (the standard abbreviation lists), possibly lexicon + cheap LLM.
 - `recitation/` — speaks the script (`--speak`): `Reciter` strategy protocol, one WAV per
   section into the work dir's `audio/`. `KokoroReciter` runs Kokoro-82M via kokoro-onnx
   (pure wheels, CPU ~4× realtime; model fetched once into `~/.cache/lecturer`). Text is

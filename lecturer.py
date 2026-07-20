@@ -32,6 +32,7 @@ from redaction import (
     ScriptSection,
     TongueInterpreter,
     Utterance,
+    ensure_synopsis,
     redact,
 )
 
@@ -350,9 +351,14 @@ class Redact(Controller):
             weaver = FootnoteWeaver()
         try:
             if self.app.pargs.llm:
+                provider = _provider(self.app, DEFAULT_MODELS)
+                synopsis = ensure_synopsis(
+                    extraction, provider, directory / "synopsis.txt", log=self.app.log.info
+                )
                 weaver = Glossator(
-                    provider=_provider(self.app, DEFAULT_MODELS),
+                    provider=provider,
                     cache_path=directory / "gloss_cache.json",
+                    synopsis=synopsis,
                     log=self.app.log.info,
                 )
             if self.app.pargs.interpret:

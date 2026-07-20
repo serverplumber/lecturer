@@ -11,10 +11,13 @@ body piece must be a verbatim stretch of the original paragraph, so a model
 that paraphrases (weaker local models especially) costs a fallback to the
 deterministic weave, never corrupted prose.
 
-Each annotated paragraph is one call through a ``GlossProvider`` adapter.
-Results are cached write-through in the working directory, keyed by provider
-and inputs, so an interrupted run resumes where it stopped and re-runs are
-free.
+Each annotated paragraph is one call through a provider adapter, prefixed
+by a cache-stable context: a short stored synopsis of the whole book (the
+voice, the argument — see :func:`ensure_synopsis`) plus the full chapter
+the paragraph belongs to, so the model can judge redundancy and reference
+against the text the notes actually hang off. Results are cached
+write-through in the working directory, keyed by provider and paragraph
+inputs only — context refinements never invalidate finished work.
 """
 
 import hashlib
@@ -22,6 +25,8 @@ import json
 import re
 from collections.abc import Callable
 from pathlib import Path
+
+from pydantic import BaseModel
 
 from extraction import Footnote
 from redaction.base import ANCHOR, Manner, Script, ScriptSection, Utterance
@@ -60,6 +65,38 @@ Do not invent anything found in neither the paragraph nor the notes.\
 # typesetting artefacts a model may reasonably drop.
 _INVISIBLES = re.compile(r"[​‌‍⁠­]")
 
+_SYNOPSIS_SYSTEM = """\
+You are preparing to adapt a scholarly monograph into an audiobook read in \
+the author's own lecturing voice. Write a synopsis of about 300 tokens for \
+the adaptation assistants who will each see only one chapter at a time: the \
+book's central argument and its arc, the author's voice and register, and \
+the recurring sources, terms, and figures. No praise, no padding — only \
+what helps someone weave the author's footnotes into speech.\
+"""
+
+
+class Synopsis(BaseModel):
+    synopsis: str
+
+
+def ensure_synopsis(extraction, provider: Provider, path: Path, log=lambda m: None) -> str | None:
+    """The book synopsis, generated once by a capable model, then yours.
+
+    Stored as ``synopsis.txt`` in the work dir and never regenerated —
+    edit it freely; delete it to re-draft. Synopsis quality gates every
+    gloss judgement downstream, so this uses the glossator's model, not
+    the cheap tier.
+    """
+    if path.exists():
+        return path.read_text().strip() or None
+    text = "\n\n".join(section.text for section in extraction.sections)
+    answer = provider.ask(_SYNOPSIS_SYSTEM, text[:600_000], Synopsis)
+    if answer is None:
+        return None
+    path.write_text(answer.synopsis.strip() + "\n")
+    log(f"synopsis drafted into {path} — edit it freely; it is never regenerated")
+    return answer.synopsis.strip()
+
 
 class Glossator:
     """LLM counterpart to the deterministic FootnoteWeaver."""
@@ -68,9 +105,11 @@ class Glossator:
         self,
         provider: Provider,
         cache_path: Path | None = None,
+        synopsis: str | None = None,
         log: Callable[[str], None] = lambda message: None,
     ) -> None:
         self.provider = provider
+        self._synopsis = synopsis
         self._cache_path = cache_path
         self._cache: dict[str, list[dict]] = {}
         if cache_path is not None and cache_path.exists():
@@ -85,15 +124,24 @@ class Glossator:
         annotated = sum(bool(ANCHOR.search(u.text)) for u in section.utterances)
         if annotated:
             self._log(f"glossing '{section.title}': {annotated} annotated paragraphs")
+        context = self._context(section) if annotated else None
         woven: set[str] = set()
         utterances: list[Utterance] = []
         for utterance in section.utterances:
             if utterance.manner is Manner.BODY:
-                utterances.extend(self._gloss_utterance(section.title, utterance, notes, woven))
+                utterances.extend(
+                    self._gloss_utterance(section.title, utterance, notes, woven, context)
+                )
             else:
                 utterances.append(utterance)
         leftovers = [note for ref, note in notes.items() if ref not in woven]
         return ScriptSection(title=section.title, utterances=utterances, footnotes=leftovers)
+
+    def _context(self, section: ScriptSection) -> str:
+        """The cache-stable prefix: book synopsis plus the whole chapter."""
+        chapter = "\n\n".join(u.text for u in section.utterances)
+        synopsis = f"Book synopsis:\n{self._synopsis}\n\n" if self._synopsis else ""
+        return f"{synopsis}The full chapter this paragraph belongs to:\n{chapter}"
 
     def _gloss_utterance(
         self,
@@ -101,6 +149,7 @@ class Glossator:
         utterance: Utterance,
         notes: dict[str, Footnote],
         woven: set[str],
+        context: str | None,
     ) -> list[Utterance]:
         refs = [match.group(1) for match in ANCHOR.finditer(utterance.text)]
         if not refs:
@@ -110,7 +159,7 @@ class Glossator:
         key = self._key(utterance.text, present)
         pieces = self._cache.get(key)
         if pieces is None:
-            pieces = self._ask(section_title, utterance.text, present)
+            pieces = self._ask(section_title, utterance.text, present, context)
             if pieces is None:
                 return weave_utterance(utterance, notes, woven)
             self._cache[key] = pieces
@@ -121,7 +170,11 @@ class Glossator:
         return [Utterance(text=piece["text"], manner=Manner(piece["manner"])) for piece in pieces]
 
     def _ask(
-        self, section_title: str, paragraph: str, notes: dict[str, Footnote]
+        self,
+        section_title: str,
+        paragraph: str,
+        notes: dict[str, Footnote],
+        context: str | None = None,
     ) -> list[dict] | None:
         notes_block = "\n".join(f"[^{ref}]: {note.text}" for ref, note in notes.items())
         request = (
@@ -131,7 +184,7 @@ class Glossator:
             "and drop the bibliographic apparatus. A purely bibliographic note "
             "produces no digression at all."
         )
-        woven = self.provider.ask(_SYSTEM, request, WovenParagraph)
+        woven = self.provider.ask(_SYSTEM, request, WovenParagraph, context=context)
         if woven is None or not _faithful(woven, paragraph):
             return None
         return [piece.model_dump() for piece in woven.pieces if piece.text.strip()]
