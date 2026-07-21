@@ -10,6 +10,23 @@ a range) is different enough from ``System``'s default dotted
 chapter.section locator that this system supplies its own — see
 ``base.py``'s ``STEPHANUS_LOCATOR``/``stephanus_locator``.
 
+Verified against the SBL Handbook's own table (§8.3.14.3, which lists
+Plato among the classical authors): sigla and spoken forms below are
+SBL's, not memory-recalled guesses — a first pass at this table (since
+replaced) had "Stat" for *Statesman* where SBL actually prescribes "Pol"
+(Politicus), "Euthyph" where SBL has "Euthyphr", and included several
+dialogues ("Ion", "Lysis", "Meno", "Crito", "Critias") that SBL's table
+doesn't cover at all. Bracketed entries in SBL (`[Alc. maj.]`,
+`[Epin.]`, `[Min.]`) mark works of disputed authorship, still real
+citable forms; the brackets themselves are apparatus, not spoken.
+
+"Ep" (Epistulae, Plato's *Letters*) is deliberately omitted: SBL's own
+rules (§8.3.14.1, rule 11) list "ep." among abbreviations reused
+identically across many different authors' letter collections, so
+attributing a bare "Ep." to Plato specifically would be a guess this
+system can't safely make without the author-name context it doesn't
+carry. Left unresolved is safer than resolved wrong.
+
 Some dialogues here overlap literally with other systems' sigla ("Apol."
 is also a natural siglum for a patristic Apology) but not in locator
 shape — a page+letter after "Apol." resolves here, a chapter.section
@@ -20,33 +37,30 @@ listed without either shadowing the other.
 from redaction.elocution.base import STEPHANUS_LOCATOR, System, stephanus_locator
 
 STEPHANUS_SIGLA: dict[str, str] = {
-    "Alcib. 1": "Alcibiades",
-    "Alcib. 2": "Second Alcibiades",
+    "Alc. maj": "Greater Alcibiades",  # disputed authorship
     "Apol": "Apology",
+    "Ax": "Axiochus",  # disputed authorship
     "Charm": "Charmides",
     "Crat": "Cratylus",
-    "Criti": "Critias",
-    "Crito": "Crito",
-    "Epin": "Epinomis",
+    "Def": "Definitions",  # disputed authorship
     "Euthyd": "Euthydemus",
-    "Euthyph": "Euthyphro",
+    "Euthyphr": "Euthyphro",
     "Gorg": "Gorgias",
-    "Hipp. Maj": "Greater Hippias",
-    "Hipp. Min": "Lesser Hippias",
-    "Ion": "Ion",
+    "Hipparch": "Hipparchus",
+    "Hipp. maj": "Greater Hippias",
+    "Hipp. min": "Lesser Hippias",
     "Lach": "Laches",
     "Leg": "Laws",
-    "Lysis": "Lysis",
     "Menex": "Menexenus",
-    "Meno": "Meno",
+    "Min": "Minos",  # disputed authorship
     "Parm": "Parmenides",
     "Phaed": "Phaedo",
     "Phaedr": "Phaedrus",
     "Phileb": "Philebus",
+    "Pol": "Statesman",
     "Prot": "Protagoras",
     "Resp": "Republic",
     "Soph": "Sophist",
-    "Stat": "Statesman",
     "Symp": "Symposium",
     "Theaet": "Theaetetus",
     "Tim": "Timaeus",

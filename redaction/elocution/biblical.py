@@ -1,9 +1,18 @@
 """The SBL Handbook's biblical book sigla — closed, standard, no draft needed.
 
-Unlike the classical author-work abbreviations, biblical book sigla are a
-small, fixed, universally known list: hardcoded rather than drafted.
-Covers the Protestant canon plus the deuterocanon/Apocrypha, since
-freelance-experts scholarship cites Tobit and Sirach as readily as Paul.
+Verified against ``style_guides/The_SBL_Handbook_of_Style...pdf`` §8.3.1
+(Hebrew Bible/Old Testament), §8.3.2 (New Testament), and §8.3.3
+(Deuterocanonical Works and Septuagint) — SBL treats all three under one
+punctuation rule (colon for chapter:verse, no period on the siglum) and
+groups them together for that reason, which is why the "biblical" system
+covers the deuterocanon/Apocrypha too rather than needing its own file.
+Each numbered book is expanded from SBL's compact "1-2 Sam" print
+convention into separate literal sigla ("1 Sam", "2 Sam"), since that's
+how they actually appear in running text; the spoken form stays "First
+Samuel" rather than SBL's own English-title column ("1 Samuel") — SBL
+verifies which siglum maps to which book, not how it should be read
+aloud, and "1 Corinthians" read aloud is the exact mangling this system
+exists to fix.
 
 "Num" (Numbers) collides with Plutarch's *Numa*, cited as "Num." in this
 corpus — see ``classical.py``'s seed table and ``base.py``'s ``_merge``
@@ -14,6 +23,7 @@ available for corpora that do cite it under this siglum).
 from redaction.elocution.base import System
 
 BIBLICAL_SIGLA: dict[str, str] = {
+    # §8.3.1 Hebrew Bible/Old Testament
     "Gen": "Genesis",
     "Exod": "Exodus",
     "Lev": "Leviticus",
@@ -24,8 +34,12 @@ BIBLICAL_SIGLA: dict[str, str] = {
     "Ruth": "Ruth",
     "1 Sam": "First Samuel",
     "2 Sam": "Second Samuel",
+    "1 Kgdms": "First Kingdoms",  # LXX numbering, alongside 1-2 Sam
+    "2 Kgdms": "Second Kingdoms",
     "1 Kgs": "First Kings",
     "2 Kgs": "Second Kings",
+    "3 Kgdms": "Third Kingdoms",  # LXX numbering, alongside 1-2 Kgs
+    "4 Kgdms": "Fourth Kingdoms",
     "1 Chr": "First Chronicles",
     "2 Chr": "Second Chronicles",
     "Ezra": "Ezra",
@@ -36,7 +50,9 @@ BIBLICAL_SIGLA: dict[str, str] = {
     "Pss": "Psalms",
     "Prov": "Proverbs",
     "Eccl": "Ecclesiastes",
+    "Qoh": "Ecclesiastes",  # alt. siglum, "Qoheleth"
     "Song": "Song of Songs",
+    "Cant": "Song of Songs",  # alt. siglum, "Canticles"
     "Isa": "Isaiah",
     "Jer": "Jeremiah",
     "Lam": "Lamentations",
@@ -54,13 +70,7 @@ BIBLICAL_SIGLA: dict[str, str] = {
     "Hag": "Haggai",
     "Zech": "Zechariah",
     "Mal": "Malachi",
-    "Tob": "Tobit",
-    "Jdt": "Judith",
-    "Wis": "Wisdom of Solomon",
-    "Sir": "Sirach",
-    "Bar": "Baruch",
-    "1 Macc": "First Maccabees",
-    "2 Macc": "Second Maccabees",
+    # §8.3.2 New Testament
     "Matt": "Matthew",
     "Mark": "Mark",
     "Luke": "Luke",
@@ -88,6 +98,27 @@ BIBLICAL_SIGLA: dict[str, str] = {
     "3 John": "Third John",
     "Jude": "Jude",
     "Rev": "Revelation",
+    # §8.3.3 Deuterocanonical Works and Septuagint
+    "Tob": "Tobit",
+    "Jdt": "Judith",
+    "Add Esth": "Additions to Esther",
+    "Wis": "Wisdom of Solomon",
+    "Sir": "Sirach",
+    "Bar": "Baruch",
+    "Ep Jer": "Epistle of Jeremiah",
+    "Add Dan": "Additions to Daniel",
+    "Pr Azar": "Prayer of Azariah",
+    "Sg Three": "Song of the Three Young Men",
+    "Sus": "Susanna",
+    "Bel": "Bel and the Dragon",
+    "1 Macc": "First Maccabees",
+    "2 Macc": "Second Maccabees",
+    "3 Macc": "Third Maccabees",
+    "4 Macc": "Fourth Maccabees",
+    "1 Esd": "First Esdras",
+    "2 Esd": "Second Esdras",
+    "Pr Man": "Prayer of Manasseh",
+    "Ps 151": "Psalm one hundred fifty-one",
 }
 
 
