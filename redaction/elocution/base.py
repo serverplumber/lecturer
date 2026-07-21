@@ -11,11 +11,12 @@ the words a reader would use ("2:10" -> "two, ten", "32.9.6-10" ->
 deliberately not inserted unless a sample proves the bare numbers
 ambiguous, matching how these are actually read aloud. The siglum's
 spoken form ("1 Cor" -> "First Corinthians", "Or." -> "Oration") needs a
-vocabulary, which is each system's own business (see ``biblical.py`` for
-a closed, hardcoded one; open ones — classical author-work abbreviations,
-and later Bekker, Diels-Kranz, Stephanus, unit systems — get a
+vocabulary, which is each system's own business. Closed, universal,
+enumerable ones (``biblical.py``, ``stephanus.py``, and in time Bekker,
+Diels-Kranz) get a hardcoded table like this module's default locator;
+open ones — classical author-work abbreviations, unit systems — get a
 hand-editable, LLM-drafted map instead, additive and never-overwriting,
-on the lexicon-draft pattern).
+on the lexicon-draft pattern.
 
 Each system's citations are matched against its own siglum table, so an
 abbreviation not yet in the table simply never matches, rather than
@@ -75,8 +76,13 @@ def _spell(n: int) -> str:
 
 # A range dash shows up as a plain hyphen, an en dash, or (this corpus's
 # typesetting) a true Unicode minus sign — all three are "to" here, never
-# subtraction.
+# subtraction. A zero-width space sometimes sits right after it (an EPUB
+# hyphenation artifact seen in this corpus's footnotes, e.g. "364b" then the
+# dash then a hidden character then "365a"): tolerated in the locator
+# patterns below, and simply skipped here since it never matches any of
+# these alternatives.
 _RANGE_DASH = "-–−"  # noqa: RUF001
+_ZWS = "\u200b"
 _LOCATOR_TOKEN = re.compile(rf"\d+|[.:]|[{_RANGE_DASH}]")
 
 
@@ -102,7 +108,34 @@ def mechanical_locator(locator: str) -> str:
 # A locator: one to three dot/colon-separated numbers, optionally a range.
 # "2:10", "2:10-12", "32.9.6-10" all match; the siglum table decides which
 # sigla this ever gets tried against.
-_LOCATOR = rf"\d+(?:[.:]\d+){{0,2}}(?:[{_RANGE_DASH}]\d+(?:[.:]\d+)?)?"
+_LOCATOR = rf"\d+(?:[.:]\d+){{0,2}}(?:[{_RANGE_DASH}]{_ZWS}?\d+(?:[.:]\d+)?)?"
+
+
+_STEPHANUS_UNIT = r"\d+[a-e]\d*"
+_STEPHANUS_UNIT_RE = re.compile(r"(\d+)([a-e])(\d*)")
+# A Stephanus locator: a page number, section letter (a-e — the five parts
+# Estienne's 1578 Plato divides each page into), optional line number,
+# optionally a range to a second such unit. "364b", "514a2", "364b-365a".
+STEPHANUS_LOCATOR = rf"{_STEPHANUS_UNIT}(?:[{_RANGE_DASH}]{_ZWS}?{_STEPHANUS_UNIT})?"
+
+
+def stephanus_locator(locator: str) -> str:
+    """Speak a Stephanus citation: page, section letter, optional line.
+
+    "364b" -> "three hundred sixty-four B"; "364b-365a" -> "...to three
+    hundred sixty-five A". The letter is capitalised so a TTS reads it as
+    a letter name rather than the indefinite article.
+    """
+    pieces = []
+    for unit in re.finditer(_STEPHANUS_UNIT, locator):
+        if pieces:
+            pieces.append(" to ")
+        page, letter, line = _STEPHANUS_UNIT_RE.match(unit.group(0)).groups()
+        piece = f"{_spell(int(page))} {letter.upper()}"
+        if line:
+            piece += f", {_spell(int(line))}"
+        pieces.append(piece)
+    return "".join(pieces)
 
 
 @dataclass
@@ -142,18 +175,32 @@ def _merge(systems: Sequence[System]) -> tuple[re.Pattern[str], list[_Entry]]:
     two characters before "Cor" could, so it is tried first and consumes
     the whole span before "Cor" ever gets a turn.
 
-    Sigla that are identical strings across systems (biblical's "Num" for
-    Numbers, classical's "Num" for Plutarch's *Numa*) can't be told apart
-    by length; those tie-break by priority, earlier systems in
-    ``systems`` winning. A real "Num" citation for the other system, in a
-    corpus that cites both, is the one case this can't get right — that
-    needs context no siglum table carries.
+    Entries are never deduplicated by siglum text alone: two systems can
+    legitimately share a written siglum with different locator shapes —
+    Plato's "Apol." (Stephanus page+letter) versus a patristic "Apol."
+    (chapter.section) — and since each is its own branch with its own
+    locator sub-pattern, the regex engine's own alternation and
+    backtracking sorts these out per citation: whichever branch's full
+    siglum-plus-locator actually matches the text that follows wins, and
+    a branch whose locator shape doesn't fit simply fails over to the
+    next one at that position.
+
+    That only works when the locator shapes differ enough to fail
+    distinctly. Sigla that are identical strings *and* share a locator
+    shape (biblical's "Num" for Numbers, classical's "Num" for Plutarch's
+    *Numa*, both plain dotted numbers) are genuinely ambiguous; those
+    tie-break by priority — earlier systems in ``systems`` win, since the
+    sort below is stable and this function lists each system's entries
+    in the order given before sorting by length. A real "Num" citation
+    for the losing system, in a corpus that cites both, is the one case
+    this can't get right — that needs context no siglum table carries.
     """
-    seen: dict[str, _Entry] = {}
-    for system in systems:
-        for siglum, spoken in system.sigla.items():
-            seen.setdefault(siglum, _Entry(siglum, spoken, system))
-    entries = sorted(seen.values(), key=lambda entry: len(entry.siglum), reverse=True)
+    entries = [
+        _Entry(siglum, spoken, system)
+        for system in systems
+        for siglum, spoken in system.sigla.items()
+    ]
+    entries.sort(key=lambda entry: len(entry.siglum), reverse=True)
     if not entries:
         return re.compile(r"(?!)"), []
     branches = (

@@ -58,14 +58,28 @@ weave them into the text as spoken digressions. TTS will start with
   (biblical's "2 Cor" vs a bare classical "Cor." would turn "2 Cor. 3.18" into "2
   Coriolanus three, eighteen" under naive sequential passes). One merged, longest-siglum-first
   alternation lets the regex engine's own leftmost, non-overlapping scan settle that for
-  free. Sigla that are identical strings across systems ("Num" for Numbers vs.
-  Plutarch's *Numa*) can't be told apart by length; those tie-break by system priority —
-  earlier systems in `default_systems()` win. A real ambiguous case (a corpus citing both
-  under the bare siglum) is the one thing this can't resolve — that needs context, which
-  is exactly the boundary the LLM-drafted systems below are meant to live behind, not
-  cross.
+  free. Entries are never deduplicated by siglum text alone — two systems can legitimately
+  share a written siglum with *different locator shapes* (Plato's "Apol." in Stephanus
+  page+letter vs. a patristic "Apol." in chapter.section), and since each is its own
+  alternation branch with its own locator sub-pattern, the regex engine's own backtracking
+  picks whichever one's full pattern actually matches the text that follows — no explicit
+  disambiguation needed. Only a siglum that is identical *and* shares a locator shape
+  ("Num" for Numbers vs. Plutarch's *Numa*, both plain dotted numbers) is genuinely
+  ambiguous; those tie-break by system priority — earlier systems in `default_systems()`
+  win. A real "Num" citation for the losing system, in a corpus that cites both, is the
+  one case this can't get right — that needs context, which is exactly the boundary the
+  LLM-drafted systems below are meant to live behind, not cross.
   - `biblical.py` — the SBL Handbook's book sigla: closed, universal, hardcoded, no draft
     needed.
+  - `stephanus.py` — Plato's dialogues, cited by Henri Estienne's 1578 page+letter
+    pagination rather than any edition's own page numbers. Closed and standard like
+    biblical, so also hardcoded, but its locator shape ("364b", "514a2", ranges like
+    "364b–365a") is different enough from the dotted default that it supplies its own
+    (`base.py`'s `STEPHANUS_LOCATOR`/`stephanus_locator`). Its "Apol." (Plato's *Apology*)
+    is the reason the shape-based disambiguation above exists: the classical citations in
+    this corpus already use "Apol." for a patristic Apology under the dotted locator, so
+    the two need to coexist under the same siglum without either being dropped once
+    classical's table grows to include it.
   - `classical.py` — the heterogeneous Latin author-work abbreviations ("Or." → "Oration",
     "Ann." → "Annals", ...). Open-vocabulary, so the real table wants a per-document
     cheap-LLM draft sweep into a hand-editable map, additive and never-overwrite, reusing
@@ -75,10 +89,11 @@ weave them into the text as spoken digressions. TTS will start with
     it wins that tie. Expand minimally once the draft sweep lands — never resolve
     author/work identity (exactly where a cheap model hallucinates; the surrounding prose
     already supplies it).
-  - **Still to come**: Bekker numbering, Diels-Kranz, and Stephanus pagination are further
-    open-vocabulary systems of the same shape once they show up outside footnotes. Units
-    (SAE vs SI collisions) are parked until citation dictation's systems are mature enough
-    to tell whether the same machinery generalises or the two need separate treatment.
+  - **Still to come**: Bekker numbering and Diels-Kranz are further closed, enumerable
+    systems of the same shape as biblical/Stephanus once they show up outside footnotes.
+    Units (SAE vs SI collisions) are parked until citation dictation's systems are mature
+    enough to tell whether the same machinery generalises or the two need separate
+    treatment.
 - `recitation/` — speaks the script (`--speak`): `Reciter` strategy protocol, one WAV per
   section into the work dir's `audio/`. `KokoroReciter` runs Kokoro-82M via kokoro-onnx
   (pure wheels, CPU ~4× realtime; model fetched once into `~/.cache/lecturer`). Text is
