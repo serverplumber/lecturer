@@ -52,6 +52,35 @@ weave them into the text as spoken digressions. TTS will start with
   `BIBLIOGRAPHY_TITLE`'s English-only regex means a non-English heading like "Riferimenti
   bibliografici" still gets its own correct section but never gets parsed into
   `BibliographyEntry` structure — no non-English book is actually in flight yet.
+
+  **Parked: a structureless-PDF front end.** A scanned book with no real text layer, no
+  outline, no font-size profile has no extractor path yet. Evaluated against a shortlist
+  of upstream layout/OCR tools (pdf-craft, Marker, MinerU, olmOCR) looking for one that
+  could turn such a blob into something with a TOC, front/back matter, and footnotes —
+  i.e. something structured enough to hand to `epub.py`, reusing its nav-based chapter
+  splitting above rather than reimplementing structure recovery per tool. One firm
+  disqualification and one real candidate came out of it, but no forcing case to wire
+  either in yet. **MinerU** strips footnotes outright ("removes headers, footers,
+  footnotes... to ensure semantic coherence") — ruled out regardless of anything else,
+  since footnote weaving is this project's whole point. **Marker** is Apache-2.0 for its
+  code (a shortlist that had it down as GPL-3.0 was wrong) and is the only candidate that
+  reuses an existing PDF text layer rather than always OCRing (`disable_ocr`), which
+  matters since every real PDF in this corpus already has one. **pdf-craft** outputs EPUB
+  with an auto-generated TOC — exactly the shape that would feed `epub.py` — but always
+  runs DeepSeek-OCR even over a PDF with a perfect text layer, making it a poor general
+  front door and a fit only for an actual blob. **olmOCR** always runs a 7B vision model
+  per page with no documented footnote handling — a last resort for genuinely degraded
+  archival scans, not general use. None of this is wired in: every PDF currently in
+  `texts/` is born-digital with a real outline and font profile (`pdf.py` already handles
+  all four cleanly), and the one file with no extractor at all — the `.djvu` of *Eros and
+  Magic* — duplicates a title already extracted from its EPUB. The router needs no new
+  code when a real blob shows up: `pdf.py` already computes the three signals that
+  jointly mean "this is a blob" (`doc.get_toc()` empty, `_font_profile`'s `note_size`
+  coming back `None`, `_pairing_holds` failing). Parked past that, too: the real blobs
+  waiting to be transcribed aren't English, and every closed-vocabulary system built so
+  far — `BIBLIOGRAPHY_TITLE`'s regex just above, `biblical.py`'s SBL sigla, `stephanus.py`
+  — is English/Latin-corpus-shaped in ways a non-English blob would immediately expose.
+  Worth revisiting once internationalization is underway, not before.
 - `redaction/` — redactional layers (`Redactor`s, applied in order) reworking the
   extraction into a `Script` of `Utterance`s tagged with a delivery `Manner`, ready for
   the TTS. Named for redaction criticism. Current layers, in order: `SeamMender` (joins
