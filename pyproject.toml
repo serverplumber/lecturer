@@ -3,6 +3,8 @@ name = "lecturer"
 version = "0.1.0"
 description = "Turn monographs into audiobooks that sound like the author lecturing from their own book"
 readme = "README.md"
+license = "ISC"
+license-files = ["LICENSE"]
 requires-python = ">=3.13"
 dependencies = [
     "anthropic>=0.116.0",
