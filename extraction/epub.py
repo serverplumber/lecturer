@@ -15,7 +15,7 @@ from xml.etree import ElementTree
 
 from bs4 import BeautifulSoup, Tag
 
-from extraction.base import Extraction, Footnote, Section
+from extraction.base import BIBLIOGRAPHY_TITLE, BibliographyEntry, Extraction, Footnote, Section
 from extraction.endnotes import pull_endnotes
 
 _CONTAINER = "META-INF/container.xml"
@@ -25,6 +25,8 @@ _OPF_NS = {"opf": "http://www.idpf.org/2007/opf"}
 _NOTE_TYPES = frozenset({"footnote", "endnote", "rearnote", "doc-footnote", "doc-endnote"})
 _NOTEREF_TYPES = frozenset({"noteref", "doc-noteref"})
 _BLOCK_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "blockquote"]
+_HEADING_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
+_MAX_TITLE_LENGTH = 60
 
 
 class EpubExtractor:
@@ -35,15 +37,20 @@ class EpubExtractor:
                 for chapter in _chapter_paths(archive)
             ]
         footnotes: list[Footnote] = []
+        bibliography: list[BibliographyEntry] = []
         for soup in soups:
             footnotes.extend(_pull_footnotes(soup))
+            bibliography.extend(_pull_bibliography(soup))
             _mark_noterefs(soup)
         if not footnotes:
             footnotes = pull_endnotes(soups)
         text = "\n\n".join(part for soup in soups if (part := _running_text(soup)))
         # TODO: split into per-chapter sections along the spine/nav once the
         # epub path gets the same treatment as PDFs.
-        return Extraction(sections=[Section(title="Full text", text=text, footnotes=footnotes)])
+        section = Section(
+            title="Full text", text=text, footnotes=footnotes, bibliography=bibliography
+        )
+        return Extraction(sections=[section])
 
 
 def _chapter_paths(archive: zipfile.ZipFile) -> list[str]:
@@ -73,6 +80,56 @@ def _pull_footnotes(soup: BeautifulSoup) -> list[Footnote]:
         element.extract()
         notes.append(Footnote(ref=element.get("id", ""), text=element.get_text(" ", strip=True)))
     return notes
+
+
+def _pull_bibliography(soup: BeautifulSoup) -> list[BibliographyEntry]:
+    """Detach a bibliography chapter's entries and return them, verbatim.
+
+    Unlike the PDF path, there's no hanging-indent geometry to reconstruct:
+    an EPUB paragraph already bounds one entry, since the source never lost
+    that structure the way a PDF's text layer does. Just find the heading
+    and take the ``<p>``/``<li>`` siblings that follow it, stopping at the
+    next heading (or the file's end) so a chapter that bundles the
+    bibliography with something else (an index, an afterword) doesn't bleed
+    into this list.
+
+    A real chapter title is short; a body paragraph that happens to contain
+    the word "references" in passing ("her speech was filled with
+    references…", a real match found in this corpus) is not — some EPUB
+    conversions mistag long paragraphs as heading elements, so title length
+    is checked alongside the word match rather than trusting the tag alone.
+
+    A long entry can itself land as two ``<p>`` elements (a source-line-wrap
+    the conversion turned into a paragraph break, seen in 11 of this
+    corpus's 112 entries) — a paragraph that doesn't end in terminal
+    punctuation is a continuation of the previous one, not a new entry, the
+    same call ``SeamMender`` makes for prose torn by a page break.
+    """
+    heading = soup.find(
+        lambda tag: (
+            tag.name in _HEADING_TAGS
+            and len(title := tag.get_text(" ", strip=True)) <= _MAX_TITLE_LENGTH
+            and BIBLIOGRAPHY_TITLE.search(title)
+        )
+    )
+    if heading is None:
+        return []
+    texts: list[str] = []
+    for sibling in list(heading.find_next_siblings()):
+        if sibling.name in _HEADING_TAGS:
+            break
+        if sibling.name in ("p", "li") and (text := sibling.get_text(" ", strip=True)):
+            if texts and not _ends_entry(texts[-1]):
+                texts[-1] = f"{texts[-1]} {text}"
+            else:
+                texts.append(text)
+        sibling.extract()
+    heading.extract()
+    return [BibliographyEntry(text=text) for text in texts]
+
+
+def _ends_entry(text: str) -> bool:
+    return text.rstrip("\"'’”").endswith((".", "?", "!"))  # noqa: RUF001
 
 
 def _mark_noterefs(soup: BeautifulSoup) -> None:

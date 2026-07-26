@@ -1,8 +1,13 @@
 """Core types for the extraction strategies."""
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
+
+# Shared between extractors: a section heading that reads as a bibliography,
+# regardless of the document format it came from.
+BIBLIOGRAPHY_TITLE = re.compile(r"bibliography|works cited|\breferences\b", re.I)
 
 
 @dataclass
@@ -18,12 +23,26 @@ class Footnote:
 
 
 @dataclass
+class BibliographyEntry:
+    """One reference entry from a bibliography, correctly bounded.
+
+    Verbatim, including any same-author continuation marker ("———.") the
+    typesetting used in place of repeating a name — resolving that, like
+    everything else about what an entry *means*, is redaction's job, not
+    extraction's.
+    """
+
+    text: str
+
+
+@dataclass
 class Section:
     """One division of the book — chapter, introduction, front matter lump."""
 
     title: str
     text: str
     footnotes: list[Footnote] = field(default_factory=list)
+    bibliography: list[BibliographyEntry] = field(default_factory=list)
 
 
 @dataclass

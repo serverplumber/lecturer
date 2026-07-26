@@ -11,6 +11,18 @@ font profile shows such a second, smaller text size, those blocks are
 parsed into footnotes and the anchors become ``[^ref]`` markers. Scanned
 books have no such profile (OCR flattens it), so they fall back to text
 only.
+
+A bibliography gets a second pass of its own. pymupdf's own block
+detector groups text by geometry, and a hanging-indent reference list
+often doesn't leave enough vertical gap between entries for that
+detector to tell them apart — entries run straight into each other with
+no separating space at all ("...1994.Ando, Clifford..."), so naively
+flattening blocks into paragraphs mangles it beyond reading. But hanging
+indent's whole premise is a left-margin signal untouched by any of
+that: every entry-opening line starts flush at one x-coordinate and
+every continuation line starts indented further right, so entries are
+recovered from where each line begins, not from guessing at name-like
+text patterns.
 """
 
 import itertools
@@ -21,7 +33,7 @@ from pathlib import Path
 
 import pymupdf
 
-from extraction.base import Extraction, Footnote, Section
+from extraction.base import BIBLIOGRAPHY_TITLE, BibliographyEntry, Extraction, Footnote, Section
 
 _PAGE_NUMBER = re.compile(r"^(?:\d+|[ivxlcdm]+)$", re.IGNORECASE)
 _HYPHEN_BREAK = re.compile(r"-\n(?=[a-z])")
@@ -38,6 +50,10 @@ _EDGE_THRESHOLD = 3
 _SUPERSCRIPT_FLAG = 1
 # How much larger than the body face a block must be set to read as a heading.
 _HEADING_MARGIN = 1.0
+# A bibliography entry's continuation lines sit at least this much further
+# right than its opening line — comfortably past float jitter, well short of
+# two genuinely different hanging-indent margins ever colliding.
+_INDENT_MARGIN = 2.0
 
 
 @dataclass
@@ -45,6 +61,12 @@ class _Span:
     text: str
     size: float
     superscript: bool
+
+
+@dataclass
+class _Line:
+    spans: list[_Span]
+    x0: float
 
 
 class PdfExtractor:
@@ -62,11 +84,12 @@ class PdfExtractor:
         # torn-out running text — re-extract with footnote mode off.
         if notes and not _pairing_holds(page_texts, notes):
             page_texts, notes = _assemble(pages, body_size, None, furniture)
-        return Extraction(sections=_split_sections(page_texts, notes, outline))
+        sections = _split_sections(pages, page_texts, notes, outline, body_size, furniture)
+        return Extraction(sections=sections)
 
 
 def _assemble(
-    pages: list[list[list[list[_Span]]]],
+    pages: list[list[list[_Line]]],
     body_size: float,
     note_size: float | None,
     furniture: set[str],
@@ -120,15 +143,21 @@ _BODY_START = re.compile(r"^\s*(\d+[.\s]|introduction\b|prologue\b|part\b|chapte
 
 
 def _split_sections(
+    pages: list[list[list[_Line]]],
     page_texts: list[list[str]],
     notes: list[tuple[int, Footnote]],
     outline: list[list],
+    body_size: float,
+    furniture: set[str],
 ) -> list[Section]:
     """Divide the pages into sections along the PDF outline's top level.
 
     Outline entries before the first body-looking one (a numbered chapter,
     "Introduction", "Part …") are lumped into a single front matter
-    section. Without an outline the whole book is one section.
+    section. Without an outline the whole book is one section. A section
+    whose title reads as a bibliography gets its text rebuilt from
+    ``pages`` by hanging-indent geometry instead of ``page_texts``' plain
+    per-block paragraphs — see :func:`_bibliography_entries`.
     """
     entries = []
     for level, title, page in outline:
@@ -149,37 +178,100 @@ def _split_sections(
     sections = []
     for (title, start), (_, next_start) in itertools.pairwise([*bounds, ("", len(page_texts) + 1)]):
         end = max(next_start - 1, start)
-        text = "\n\n".join(p for page in page_texts[start - 1 : end] for p in page)
         section_notes = [note for page, note in notes if start <= page <= end]
+        bibliography = []
+        if BIBLIOGRAPHY_TITLE.search(title):
+            bibliography = _bibliography_entries(
+                pages[start - 1 : end], body_size, furniture, title
+            )
+        if bibliography:
+            text = "\n\n".join(entry.text for entry in bibliography)
+        else:
+            text = "\n\n".join(p for page in page_texts[start - 1 : end] for p in page)
         if text or section_notes:
-            sections.append(Section(title=title, text=text, footnotes=section_notes))
+            sections.append(
+                Section(title=title, text=text, footnotes=section_notes, bibliography=bibliography)
+            )
     return sections
 
 
-def _page_blocks(page: pymupdf.Page) -> list[list[list[_Span]]]:
+def _bibliography_entries(
+    pages: list[list[list[_Line]]], body_size: float, furniture: set[str], title: str
+) -> list[BibliographyEntry]:
+    """Recover entries from a hanging-indent reference list by line geometry.
+
+    The margin is fixed per page, not once for the whole section: this
+    book mirrors its margins between facing pages (entries open at
+    x0≈67 on some pages, x0≈58 on others — a binding-gutter offset, not
+    noise), so a single section-wide minimum would misjudge every line on
+    whichever pages use the wider one. Any line at that page's own margin
+    starts a new entry; anything further right continues the previous
+    one, across a page break if need be, which is exactly how these
+    lists are typeset. Each line's raw text is kept unflattened until its
+    whole entry is assembled, then flattened once (as ``_body_text``
+    does), so a hyphenation break spanning two continuation lines heals
+    the same way it would within an ordinary paragraph, rather than
+    picking up a spurious space at the join.
+
+    Two-column bibliographies would defeat this — a single margin per
+    page can't distinguish "new entry" from "second column" — but
+    haven't come up in this corpus yet.
+    """
+    page_lines: list[list[tuple[float, str]]] = []
+    for page in pages:
+        collected = []
+        for block in page:
+            for line in block:
+                if _dominant_size([line]) > body_size + _HEADING_MARGIN:
+                    continue
+                raw = "".join(span.text for span in line.spans)
+                flattened = _flatten(raw)
+                is_title = flattened.casefold() == title.casefold()
+                if not flattened or is_title or _is_page_furniture(flattened, furniture):
+                    continue
+                collected.append((line.x0, raw))
+        page_lines.append(collected)
+
+    raw_entries: list[list[str]] = []
+    for collected in page_lines:
+        if not collected:
+            continue
+        margin = min(x0 for x0, _ in collected)
+        for x0, raw in collected:
+            if raw_entries and x0 > margin + _INDENT_MARGIN:
+                raw_entries[-1].append(raw)
+            else:
+                raw_entries.append([raw])
+    return [BibliographyEntry(text=_flatten("\n".join(raw))) for raw in raw_entries]
+
+
+def _page_blocks(page: pymupdf.Page) -> list[list[_Line]]:
     """The page's text blocks as lines of spans, skipping empty ones."""
     blocks = []
     for block in page.get_text("dict")["blocks"]:
         if block["type"] != 0:
             continue
         lines = [
-            [
-                _Span(
-                    text=span["text"],
-                    size=span["size"],
-                    superscript=bool(span["flags"] & _SUPERSCRIPT_FLAG),
-                )
-                for span in line["spans"]
-            ]
+            _Line(
+                spans=[
+                    _Span(
+                        text=span["text"],
+                        size=span["size"],
+                        superscript=bool(span["flags"] & _SUPERSCRIPT_FLAG),
+                    )
+                    for span in line["spans"]
+                ],
+                x0=line["bbox"][0],
+            )
             for line in block["lines"]
         ]
-        lines = [line for line in lines if any(span.text.strip() for span in line)]
+        lines = [line for line in lines if any(span.text.strip() for span in line.spans)]
         if lines:
             blocks.append(lines)
     return blocks
 
 
-def _font_profile(pages: list[list[list[list[_Span]]]]) -> tuple[float, float | None]:
+def _font_profile(pages: list[list[list[_Line]]]) -> tuple[float, float | None]:
     """The dominant body font size, and the footnote size if the book has one.
 
     Sizes are weighted by how many characters they set. The footnote size
@@ -191,7 +283,7 @@ def _font_profile(pages: list[list[list[list[_Span]]]]) -> tuple[float, float | 
     for blocks in pages:
         for block in blocks:
             for line in block:
-                for span in line:
+                for span in line.spans:
                     if not span.superscript:
                         weights[round(span.size, 1)] += len(span.text)
     if not weights:
@@ -206,28 +298,26 @@ def _font_profile(pages: list[list[list[list[_Span]]]]) -> tuple[float, float | 
     return body_size, note_size
 
 
-def _dominant_size(block: list[list[_Span]]) -> float:
+def _dominant_size(block: list[_Line]) -> float:
     weights: Counter[float] = Counter()
     for line in block:
-        for span in line:
+        for span in line.spans:
             if not span.superscript:
                 weights[round(span.size, 1)] += len(span.text)
     return weights.most_common(1)[0][0] if weights else 0.0
 
 
-def _is_heading(block: list[list[_Span]], body_size: float) -> bool:
+def _is_heading(block: list[_Line], body_size: float) -> bool:
     return _dominant_size(block) > body_size + _HEADING_MARGIN
 
 
-def _merge_wrapped_headings(
-    blocks: list[list[list[_Span]]], body_size: float
-) -> list[list[list[_Span]]]:
+def _merge_wrapped_headings(blocks: list[list[_Line]], body_size: float) -> list[list[_Line]]:
     """Rejoin headings the typesetting wraps into one block per line.
 
     Consecutive blocks set in the same above-body face are one heading; a
     different face, or any body text in between, starts afresh.
     """
-    merged: list[list[list[_Span]]] = []
+    merged: list[list[_Line]] = []
     for block in blocks:
         if (
             merged
@@ -240,7 +330,7 @@ def _merge_wrapped_headings(
     return merged
 
 
-def _is_note_block(block: list[list[_Span]], body_size: float, note_size: float | None) -> bool:
+def _is_note_block(block: list[_Line], body_size: float, note_size: float | None) -> bool:
     if note_size is None:
         return False
     dominant = _dominant_size(block)
@@ -248,7 +338,7 @@ def _is_note_block(block: list[list[_Span]], body_size: float, note_size: float 
 
 
 def _parse_notes(
-    block: list[list[_Span]], page_number: int, notes: list[tuple[int, Footnote]]
+    block: list[_Line], page_number: int, notes: list[tuple[int, Footnote]]
 ) -> list[str]:
     """Add the block's notes to ``notes`` as (page, footnote) pairs, line by line.
 
@@ -261,7 +351,7 @@ def _parse_notes(
     """
     leftovers = []
     for line in block:
-        text = _flatten("".join(span.text for span in line))
+        text = _flatten("".join(span.text for span in line.spans))
         if not text:
             continue
         if start := _NOTE_START.match(text):
@@ -275,12 +365,12 @@ def _parse_notes(
     return leftovers
 
 
-def _body_text(block: list[list[_Span]], page_number: int, mark_anchors: bool) -> str:
+def _body_text(block: list[_Line], page_number: int, mark_anchors: bool) -> str:
     """Flatten a body block, replacing superscript note anchors with markers."""
     lines = []
     for line in block:
         parts = []
-        for span in line:
+        for span in line.spans:
             anchor = span.text.strip()
             if mark_anchors and span.superscript and anchor.isdigit():
                 parts.append(f"[^p{page_number}-n{anchor}]")
@@ -290,8 +380,8 @@ def _body_text(block: list[list[_Span]], page_number: int, mark_anchors: bool) -
     return _flatten("\n".join(lines))
 
 
-def _plain_text(block: list[list[_Span]]) -> str:
-    return _flatten("\n".join("".join(span.text for span in line) for line in block))
+def _plain_text(block: list[_Line]) -> str:
+    return _flatten("\n".join("".join(span.text for span in line.spans) for line in block))
 
 
 def _normalize(paragraph: str) -> str:
@@ -304,7 +394,7 @@ def _normalize(paragraph: str) -> str:
     return re.sub(r"[\s\d]+", "", paragraph).lower()
 
 
-def _furniture(pages: list[list[list[list[_Span]]]]) -> set[str]:
+def _furniture(pages: list[list[list[_Line]]]) -> set[str]:
     """Normalized forms of short blocks recurring on enough pages to be furniture.
 
     Blocks are counted twice over: everywhere on the page against a

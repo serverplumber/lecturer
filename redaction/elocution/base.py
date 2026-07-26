@@ -30,7 +30,7 @@ substring that an earlier, wider citation should have owned whole.
 """
 
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from redaction.base import Script, ScriptSection, Utterance
@@ -105,10 +105,17 @@ def mechanical_locator(locator: str) -> str:
     return "".join(pieces)
 
 
-# A locator: one to three dot/colon-separated numbers, optionally a range.
+# A locator: one or more dot/colon-separated numbers, optionally a range.
 # "2:10", "2:10-12", "32.9.6-10" all match; the siglum table decides which
-# sigla this ever gets tried against.
-_LOCATOR = rf"\d+(?:[.:]\d+){{0,2}}(?:[{_RANGE_DASH}]{_ZWS}?\d+(?:[.:]\d+)?)?"
+# sigla this ever gets tried against. Not capped at three parts — real
+# citations in this corpus go to four ("Livy, 13.16.8.1"), and nothing
+# about the grammar depends on a fixed depth: the repeated group only ever
+# continues onto a digit immediately after a "." or ":", so a genuine
+# sentence break (period-then-space, or period-then-capital) still stops
+# the match exactly where the old bounded version did. Public: this is the
+# shared sub-grammar other elocution modules (e.g. ``citation_pairing.py``)
+# import rather than duplicate.
+LOCATOR = rf"\d+(?:[.:]\d+)*(?:[{_RANGE_DASH}]{_ZWS}?\d+(?:[.:]\d+)*)?"
 
 
 _STEPHANUS_UNIT = r"\d+[a-e]\d*"
@@ -150,8 +157,30 @@ class System:
 
     name: str
     sigla: Mapping[str, str]
-    locator: str = _LOCATOR
+    locator: str = LOCATOR
     speak_locator: Callable[[str], str] = mechanical_locator
+
+
+def bare_author_system(authors: Iterable[str]) -> System:
+    """A system for authors cited by name alone, with no work siglum at all.
+
+    Most classical authors never get their own multi-work sigla table —
+    SBL enumerates the ones that do (Josephus, Philo, Suetonius, ...),
+    each because their body of distinct works needs disambiguating.
+    Someone conventionally cited as having written one work is just
+    named directly before the locator: "Cassius Dio, 57.25.8", "Livy,
+    1.36.2-6". There's no abbreviation to expand, so this reuses the same
+    matching and replacement machinery as every siglum table, just keyed
+    by the author's own full name — the "siglum" is the name, and the
+    "spoken form" is that name again, with the comma the source already
+    puts there baked in, since ``_merge``'s comma-or-period separator is
+    consumed by the match and would otherwise vanish from the spoken
+    output, losing the pause a reader would actually say. That comma is
+    added unconditionally, even where the source has none ("Livy 1.36.2"
+    would still speak "Livy, one, thirty-six, two") — a deliberate
+    choice, not a bug: every one of these citations wants that pause.
+    """
+    return System("bare_author", {name: f"{name}," for name in authors})
 
 
 @dataclass
@@ -203,8 +232,17 @@ def _merge(systems: Sequence[System]) -> tuple[re.Pattern[str], list[_Entry]]:
     entries.sort(key=lambda entry: len(entry.siglum), reverse=True)
     if not entries:
         return re.compile(r"(?!)"), []
+    # An abbreviation is followed by an optional period ("Num. 8.10") or
+    # nothing at all ("1 Cor 2:10"); a bare author name cited with no
+    # siglum ("Cassius Dio, 57.25.8", see ``bare_author_system``) is
+    # followed by a comma instead — widened here rather than given its own
+    # branch shape, since the separator is the only thing that differs.
+    # A single literal space, not ``\s+``: extraction joins paragraphs with
+    # blank lines, and ``\s+`` would let a siglum-shaped word ending one
+    # paragraph match across the break into a locator-shaped number
+    # starting the next.
     branches = (
-        rf"(?P<sig{i}>{re.escape(entry.siglum)})\.? (?P<loc{i}>{entry.system.locator})"
+        rf"(?P<sig{i}>{re.escape(entry.siglum)})[,.]? (?P<loc{i}>{entry.system.locator})"
         for i, entry in enumerate(entries)
     )
     return re.compile(rf"\b(?:{'|'.join(branches)})\b"), entries
