@@ -32,29 +32,37 @@ _MAX_TITLE_LENGTH = 60
 class EpubExtractor:
     def extract(self, document: Path) -> Extraction:
         with zipfile.ZipFile(document) as archive:
-            soups = [
-                BeautifulSoup(archive.read(chapter), "html.parser")
-                for chapter in _chapter_paths(archive)
-            ]
+            paths = _chapter_paths(archive)
+            soups = [BeautifulSoup(archive.read(path), "html.parser") for path in paths]
+            leaves = _nav_leaves(archive)
         footnotes: list[Footnote] = []
-        bibliography: list[BibliographyEntry] = []
         for soup in soups:
             footnotes.extend(_pull_footnotes(soup))
-            bibliography.extend(_pull_bibliography(soup))
             _mark_noterefs(soup)
         if not footnotes:
             footnotes = pull_endnotes(soups)
-        text = "\n\n".join(part for soup in soups if (part := _running_text(soup)))
-        # TODO: split into per-chapter sections along the spine/nav once the
-        # epub path gets the same treatment as PDFs.
-        section = Section(
-            title="Full text", text=text, footnotes=footnotes, bibliography=bibliography
-        )
-        return Extraction(sections=[section])
+        if not leaves:
+            bibliography = []
+            for soup in soups:
+                entries, _ = _pull_bibliography(soup)
+                bibliography.extend(entries)
+            text = "\n\n".join(part for soup in soups if (part := _running_text(soup)))
+            section = Section(
+                title="Full text", text=text, footnotes=footnotes, bibliography=bibliography
+            )
+            return Extraction(sections=[section])
+        return Extraction(sections=_split_sections(paths, soups, leaves, footnotes))
 
 
 def _chapter_paths(archive: zipfile.ZipFile) -> list[str]:
-    """Return the archive paths of the spine's XHTML chapters, in reading order."""
+    """Return the archive paths of the spine's XHTML chapters, in reading order.
+
+    ``linear="no"`` itemrefs (a duplicate cover page, the interactive nav
+    document itself) are auxiliary, not part of the book's own reading
+    order — Couliano's *Eros and Magic* marks both this way, and the nav
+    document's own ``<li>`` list would otherwise read as running-text
+    paragraphs, one chapter title per "line".
+    """
     container = ElementTree.fromstring(archive.read(_CONTAINER))
     opf_path = container.find(".//c:rootfile", _CONTAINER_NS).attrib["full-path"]
     opf = ElementTree.fromstring(archive.read(opf_path))
@@ -64,8 +72,59 @@ def _chapter_paths(archive: zipfile.ZipFile) -> list[str]:
     return [
         str(opf_dir / unquote(item.attrib["href"]))
         for ref in opf.findall(".//opf:spine/opf:itemref", _OPF_NS)
-        if (item := items[ref.attrib["idref"]]).attrib.get("media-type") == "application/xhtml+xml"
+        if ref.attrib.get("linear", "yes") != "no"
+        and (item := items[ref.attrib["idref"]]).attrib.get("media-type") == "application/xhtml+xml"
     ]
+
+
+_NCX_NS = {"n": "http://www.daisy.org/z3986/2005/ncx/"}
+
+
+def _nav_leaves(archive: zipfile.ZipFile) -> list[tuple[str, str, str | None]]:
+    """The book's chapter/part tree, flattened to its leaves: (title, path, fragment).
+
+    A navPoint with children is a Part, not a chapter — only leaves become
+    sections, so a Part heading doesn't swallow every chapter beneath it into
+    one section spanning several (this corpus's EPUBs nest chapters three
+    navPoints deep: Part > Chapter). Read from the NCX the spine's ``toc``
+    attribute names; both EPUBs validated against so far are Calibre/EPUB2
+    productions with no EPUB3 nav document to prefer instead, so that path
+    isn't built until a real one shows up.
+    """
+    container = ElementTree.fromstring(archive.read(_CONTAINER))
+    opf_path = container.find(".//c:rootfile", _CONTAINER_NS).attrib["full-path"]
+    opf = ElementTree.fromstring(archive.read(opf_path))
+    opf_dir = PurePosixPath(opf_path).parent
+
+    items = {item.attrib["id"]: item for item in opf.findall(".//opf:manifest/opf:item", _OPF_NS)}
+    spine = opf.find(".//opf:spine", _OPF_NS)
+    ncx_item = items.get(spine.attrib.get("toc")) if spine is not None else None
+    if ncx_item is None:
+        return []
+
+    ncx_path = str(opf_dir / unquote(ncx_item.attrib["href"]))
+    ncx_dir = PurePosixPath(ncx_path).parent
+    ncx = ElementTree.fromstring(archive.read(ncx_path))
+    top = ncx.findall("./n:navMap/n:navPoint", _NCX_NS)
+    return _flatten_navmap(top, ncx_dir)
+
+
+def _flatten_navmap(
+    points: list[ElementTree.Element], base_dir: PurePosixPath
+) -> list[tuple[str, str, str | None]]:
+    leaves: list[tuple[str, str, str | None]] = []
+    for point in points:
+        children = point.findall("n:navPoint", _NCX_NS)
+        if children:
+            leaves.extend(_flatten_navmap(children, base_dir))
+            continue
+        label = point.find("n:navLabel/n:text", _NCX_NS)
+        content = point.find("n:content", _NCX_NS)
+        if label is None or label.text is None or content is None or not content.attrib.get("src"):
+            continue
+        path, _, fragment = unquote(content.attrib["src"]).partition("#")
+        leaves.append((" ".join(label.text.split()), str(base_dir / path), fragment or None))
+    return leaves
 
 
 def _semantic_types(tag: Tag) -> set[str]:
@@ -82,7 +141,7 @@ def _pull_footnotes(soup: BeautifulSoup) -> list[Footnote]:
     return notes
 
 
-def _pull_bibliography(soup: BeautifulSoup) -> list[BibliographyEntry]:
+def _pull_bibliography(soup: BeautifulSoup) -> tuple[list[BibliographyEntry], str | None]:
     """Detach a bibliography chapter's entries and return them, verbatim.
 
     Unlike the PDF path, there's no hanging-indent geometry to reconstruct:
@@ -104,6 +163,10 @@ def _pull_bibliography(soup: BeautifulSoup) -> list[BibliographyEntry]:
     corpus's 112 entries) — a paragraph that doesn't end in terminal
     punctuation is a continuation of the previous one, not a new entry, the
     same call ``SeamMender`` makes for prose torn by a page break.
+
+    Also returns the heading's own fragment id (or ``None``), read before
+    it's extracted — the caller uses it to attribute these entries to the
+    right leaf section when a file holds more than one.
     """
     heading = soup.find(
         lambda tag: (
@@ -113,7 +176,8 @@ def _pull_bibliography(soup: BeautifulSoup) -> list[BibliographyEntry]:
         )
     )
     if heading is None:
-        return []
+        return [], None
+    heading_id = heading.get("id")
     texts: list[str] = []
     for sibling in list(heading.find_next_siblings()):
         if sibling.name in _HEADING_TAGS:
@@ -125,7 +189,7 @@ def _pull_bibliography(soup: BeautifulSoup) -> list[BibliographyEntry]:
                 texts.append(text)
         sibling.extract()
     heading.extract()
-    return [BibliographyEntry(text=text) for text in texts]
+    return [BibliographyEntry(text=text) for text in texts], heading_id
 
 
 def _ends_entry(text: str) -> bool:
@@ -141,7 +205,116 @@ def _mark_noterefs(soup: BeautifulSoup) -> None:
 
 def _running_text(soup: BeautifulSoup) -> str:
     """Flatten a chapter to plain text, one blank line between blocks."""
-    blocks = [b for b in soup.find_all(_BLOCK_TAGS) if b.find_parent(_BLOCK_TAGS) is None]
+    blocks = _top_level_blocks(soup)
     if not blocks:
         return soup.get_text(" ", strip=True)
+    return _blocks_text(blocks)
+
+
+def _top_level_blocks(soup: BeautifulSoup) -> list[Tag]:
+    return [b for b in soup.find_all(_BLOCK_TAGS) if b.find_parent(_BLOCK_TAGS) is None]
+
+
+def _blocks_text(blocks: list[Tag]) -> str:
     return "\n\n".join(text for b in blocks if (text := b.get_text(" ", strip=True)))
+
+
+def _find_leaf_block(blocks: list[Tag], fragment: str) -> int | None:
+    """The index of the top-level block a leaf's fragment id resolves to.
+
+    The id usually sits on the block itself (a heading), sometimes on an
+    inline anchor nested inside it (a bookmark right before the heading
+    text) — either way it's still this block's own content.
+    """
+    for i, block in enumerate(blocks):
+        if block.get("id") == fragment or block.find(id=fragment) is not None:
+            return i
+    return None
+
+
+def _split_sections(
+    paths: list[str],
+    soups: list[BeautifulSoup],
+    leaves: list[tuple[str, str, str | None]],
+    footnotes: list[Footnote],
+) -> list[Section]:
+    """Divide a book's chapter files into sections along its own navigation tree.
+
+    A file with no leaf pointing to it is front matter (before the first
+    leaf), back matter (after the last), or — the common case, since
+    Calibre splits a long chapter across several physical files but the nav
+    only ever points at the first — a continuation folded into whichever
+    leaf precedes it, rather than an unnamed section of its own. Bibliography
+    entries pulled from a file attach to the leaf whose fragment matches the
+    heading's own id, or to that file's own (usually sole) leaf when the
+    heading has none. Footnotes attach to whichever section's own text
+    actually carries their ``[^ref]`` marker, since one notes-chapter's
+    entries (the endnotes fallback) land across several leaf sections, keyed
+    by which chapter's body the marker itself ended up in — not by which
+    leaf the note text was pulled from.
+    """
+    by_path: dict[str, list[tuple[int, str | None]]] = {}
+    for index, (_, path, fragment) in enumerate(leaves):
+        by_path.setdefault(path, []).append((index, fragment))
+
+    texts: list[list[str]] = [[] for _ in leaves]
+    bibliographies: list[list[BibliographyEntry]] = [[] for _ in leaves]
+    front_matter: list[str] = []
+    back_matter: list[str] = []
+    current = -1
+
+    for path, soup in zip(paths, soups, strict=True):
+        entries, heading_id = _pull_bibliography(soup)
+        blocks = _top_level_blocks(soup)
+        own_leaves = by_path.get(path)
+
+        if own_leaves is None:
+            # A chapter split across several files (Calibre's own doing) only
+            # has its first file as a nav leaf; the rest carry no leaf of
+            # their own and continue whichever chapter is still open, not
+            # "back matter" — that label is reserved for content past the
+            # book's very last leaf.
+            text = _blocks_text(blocks)
+            if current == -1:
+                bucket = front_matter
+            elif current == len(leaves) - 1:
+                bucket = back_matter
+            else:
+                bucket = texts[current]
+            if text:
+                bucket.append(text)
+            if entries:
+                bucket.extend(entry.text for entry in entries)
+            continue
+
+        bounds = sorted(
+            (0 if fragment is None else (_find_leaf_block(blocks, fragment) or 0), index)
+            for index, fragment in own_leaves
+        )
+        if bounds[0][0] > 0:
+            lead = _blocks_text(blocks[: bounds[0][0]])
+            if lead:
+                (texts[current] if current >= 0 else front_matter).append(lead)
+        for i, (start, index) in enumerate(bounds):
+            end = bounds[i + 1][0] if i + 1 < len(bounds) else len(blocks)
+            text = _blocks_text(blocks[start:end])
+            if text:
+                texts[index].append(text)
+            current = index
+        if entries:
+            target = next((i for i, f in own_leaves if f == heading_id), own_leaves[0][0])
+            bibliographies[target].extend(entries)
+
+    sections = []
+    if front_matter:
+        sections.append(Section(title="Front matter", text="\n\n".join(front_matter)))
+    for (title, _, _), text, bibliography in zip(leaves, texts, bibliographies, strict=True):
+        body = "\n\n".join(text)
+        section_notes = [note for note in footnotes if f"[^{note.ref}]" in body]
+        if body or bibliography or section_notes:
+            sections.append(
+                Section(title=title, text=body, footnotes=section_notes, bibliography=bibliography)
+            )
+    if back_matter:
+        sections.append(Section(title="Back matter", text="\n\n".join(back_matter)))
+    return sections

@@ -25,7 +25,33 @@ weave them into the text as spoken digressions. TTS will start with
   "references" as a heading element) and takes the `<p>`/`<li>` siblings after it, merging
   one that doesn't end in terminal punctuation into the previous entry — a source
   line-wrap the conversion turned into a paragraph break, the same call `SeamMender` makes
-  for prose torn by a page break.
+  for prose torn by a page break. Chapter splitting reads the book's own navigation tree
+  (`_nav_leaves`) rather than the spine alone: the spine only gives file order, and this
+  corpus's EPUBs nest three navPoints deep (Part > numbered chapter), so only leaf
+  navPoints become sections — a Part-level entry would otherwise swallow every chapter
+  under it into one section spanning several. Read from the NCX the spine's `toc`
+  attribute names; an EPUB3 nav document isn't parsed yet, since neither validated EPUB
+  (both Calibre/EPUB2 productions) declares one. A leaf's fragment can land mid-file —
+  one Couliano EPUB packs three chapters and its bibliography into a single physical file,
+  fragment-addressed — so a file's own top-level blocks are cut at whichever block carries
+  that fragment's id, not just at file boundaries. A file with no leaf of its own (a
+  chapter Calibre split across several physical files, the nav pointing only at the first)
+  continues whichever section is still open rather than becoming spurious back matter;
+  only content past the very last leaf earns that label — the earlier version of this
+  routed *any* untargeted file to back matter once one leaf had been seen, silently moving
+  a third of some chapters' own footnote-bearing text there. Verified against Couliano's
+  *Eros and Magic* and *I miti dei dualismi occidentali*: each section's own footnote
+  markers summed to the same book-wide total `pull_endnotes` finds (492 of 493 — the one
+  gap is a pre-existing unpaired note predating this change, not investigated further),
+  and dropping `linear="no"` spine items (a redundant cover page, and the interactive nav
+  document itself — its own `<li>` list would otherwise read as body paragraphs) keeps two
+  near-duplicate blobs out of the running text. Front matter still legitimately speaks a
+  "Table of Contents" heading and the chapter list beneath it — a real printed Contents
+  page from the book's own front matter file, not a nav artefact, so left as verbatim
+  extraction requires; only redaction gets to judge whether it's worth reciting. Surfaced but left alone:
+  `BIBLIOGRAPHY_TITLE`'s English-only regex means a non-English heading like "Riferimenti
+  bibliografici" still gets its own correct section but never gets parsed into
+  `BibliographyEntry` structure — no non-English book is actually in flight yet.
 - `redaction/` — redactional layers (`Redactor`s, applied in order) reworking the
   extraction into a `Script` of `Utterance`s tagged with a delivery `Manner`, ready for
   the TTS. Named for redaction criticism. Current layers, in order: `SeamMender` (joins
