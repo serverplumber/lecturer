@@ -19,7 +19,7 @@ from pathlib import Path
 
 from cement import App, Controller
 
-from extraction import Extraction, UnsupportedFormatError, extract
+from extraction import Extraction, UnsupportedFormatError, extract, read_metadata
 from redaction import (
     DEFAULT_MODELS,
     PROVIDERS,
@@ -676,8 +676,15 @@ def _recite_phase(
 def _publish_phase(app, directory: Path, script: Script, variant: str, *, skip):
     from recitation import publish
 
+    metadata = read_metadata((directory / WORKING_TEXT).resolve())
     playlist = publish(
-        script, directory, stem=section_stem, log=app.log.info, skip=skip, variant=variant
+        script,
+        directory,
+        stem=section_stem,
+        log=app.log.info,
+        skip=skip,
+        variant=variant,
+        metadata=metadata,
     )
     if playlist is None:
         app.log.warning("nothing to publish: no recited sections found")

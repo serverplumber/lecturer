@@ -33,9 +33,17 @@ from pathlib import Path
 
 import pymupdf
 
-from extraction.base import BIBLIOGRAPHY_TITLE, BibliographyEntry, Extraction, Footnote, Section
+from extraction.base import (
+    BIBLIOGRAPHY_TITLE,
+    BibliographyEntry,
+    Extraction,
+    Footnote,
+    Metadata,
+    Section,
+)
 
 _PAGE_NUMBER = re.compile(r"^(?:\d+|[ivxlcdm]+)$", re.IGNORECASE)
+_PDF_DATE_YEAR = re.compile(r"^D:(\d{4})")
 _HYPHEN_BREAK = re.compile(r"-\n(?=[a-z])")
 _SOFT_HYPHEN = re.compile(r"­\s*")
 # C0 controls and DEL, except tab and newline: text layers hide artefacts
@@ -86,6 +94,23 @@ class PdfExtractor:
             page_texts, notes = _assemble(pages, body_size, None, furniture)
         sections = _split_sections(pages, page_texts, notes, outline, body_size, furniture)
         return Extraction(sections=sections)
+
+
+def read_metadata(document: Path) -> Metadata:
+    """The PDF trailer's own Info dictionary: title, author, and a publication year.
+
+    No language or publisher: pymupdf's ``metadata`` dict has no such keys,
+    and nothing else in a born-digital PDF names them reliably. The year
+    comes from ``creationDate`` rather than any guess — the four born-digital
+    PDFs in this corpus all stamp it close to their real publication date,
+    unlike an EPUB's separate Calibre-conversion timestamp.
+    """
+    with pymupdf.open(document) as doc:
+        info = doc.metadata
+    year = None
+    if match := _PDF_DATE_YEAR.match(info.get("creationDate") or ""):
+        year = match.group(1)
+    return Metadata(title=info.get("title") or None, author=info.get("author") or None, year=year)
 
 
 def _assemble(

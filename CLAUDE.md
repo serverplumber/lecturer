@@ -291,7 +291,28 @@ weave them into the text as spoken digressions. TTS will start with
   per-section Opus (~10x smaller, streamed through the soundfile wheel's libsndfile)
   plus an `.m3u` playlist with section titles and durations, and — when ffmpeg is on
   PATH — a single chaptered `.m4b` audiobook per variant (the universal format; AirDrop
-  it to a phone and Books treats it right). `--voice` takes a name or a weighted
+  it to a phone and Books treats it right). Both the Opus files and the `.m4b` carry real
+  tags — title, artist/album_artist, album, date, genre — read from the source document's
+  own metadata (`extraction.read_metadata`: an EPUB's OPF `<metadata>` block, filtering
+  `dc:creator` to `opf:role="aut"` so a translator credit doesn't end up as a co-author; a
+  PDF's trailer Info dictionary, trusting `creationDate` for the year since a born-digital
+  PDF stamps that close to publication — unlike an EPUB's separate Calibre-conversion
+  timestamp, which is why that one reads `dc:date` instead). Every field is left `None`
+  rather than guessed when the document doesn't state it plainly, the same abstain-over-guess
+  posture as `sniff_style`. One field is spent on the software itself: every file's `comment`
+  tag credits Lecturer with a link back to the repo — the one part of "fill in every field"
+  that isn't a fact about someone else's book. Confirmed with `ffprobe -show_entries
+  stream_tags`/`format_tags` rather than trusting exit codes: libsndfile's OGG/Opus writer
+  does honour `SoundFile.title`/`.artist`/etc. (surfaced as upper-case Vorbis comments,
+  `software` becomes `ENCODER`), but only if set before the first `write()` call, and
+  `ffprobe -show_format` alone won't show them — Opus tags land at the stream level, not
+  the format level, a container-parsing quirk of this ffprobe/libsndfile combination, not
+  evidence they're missing. Titles run through `-metadata`'s escaping rules
+  (`\`, `=`, `;`, `#`, newline) before they reach the `.m4b`'s `FFMETADATA1` file, chapter
+  titles included — previously unescaped, latent since no title so far has actually
+  contained one of those characters. Bound by the same WAV-mtime gate as the rest of
+  `publish`: an already-built `.m4b`/`.opus` doesn't regain tags on a plain re-run; delete
+  it to force a rebuild. `--voice` takes a name or a weighted
   blend of style vectors (default `af_kore+af_aoede`; af_heart/af_bella glottal-pause before
   vowel-initial words — measure, don't trust ears alone). Tagged languages Kokoro
   was trained on switch to a native voice; Latin (Italian rules — ecclesiastical) and

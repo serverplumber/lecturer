@@ -11,6 +11,24 @@ BIBLIOGRAPHY_TITLE = re.compile(r"bibliography|works cited|\breferences\b", re.I
 
 
 @dataclass
+class Metadata:
+    """Best-effort bibliographic facts about the source document, for tagging audio.
+
+    Every field is optional and left ``None`` rather than guessed: a PDF's
+    embedded metadata is as likely to hold a scanner job name as a real
+    title, and an EPUB's Calibre conversion timestamp is not its publication
+    date, so nothing here is inferred beyond what the document's own
+    metadata literally states.
+    """
+
+    title: str | None = None
+    author: str | None = None
+    language: str | None = None
+    year: str | None = None
+    publisher: str | None = None
+
+
+@dataclass
 class Footnote:
     """A footnote lifted out of the running text.
 

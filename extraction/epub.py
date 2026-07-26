@@ -15,12 +15,21 @@ from xml.etree import ElementTree
 
 from bs4 import BeautifulSoup, Tag
 
-from extraction.base import BIBLIOGRAPHY_TITLE, BibliographyEntry, Extraction, Footnote, Section
+from extraction.base import (
+    BIBLIOGRAPHY_TITLE,
+    BibliographyEntry,
+    Extraction,
+    Footnote,
+    Metadata,
+    Section,
+)
 from extraction.endnotes import pull_endnotes
 
 _CONTAINER = "META-INF/container.xml"
 _CONTAINER_NS = {"c": "urn:oasis:names:tc:opendocument:xmlns:container"}
 _OPF_NS = {"opf": "http://www.idpf.org/2007/opf"}
+_OPF_URI = _OPF_NS["opf"]
+_DC_NS = {"dc": "http://purl.org/dc/elements/1.1/"}
 
 _NOTE_TYPES = frozenset({"footnote", "endnote", "rearnote", "doc-footnote", "doc-endnote"})
 _NOTEREF_TYPES = frozenset({"noteref", "doc-noteref"})
@@ -75,6 +84,45 @@ def _chapter_paths(archive: zipfile.ZipFile) -> list[str]:
         if ref.attrib.get("linear", "yes") != "no"
         and (item := items[ref.attrib["idref"]]).attrib.get("media-type") == "application/xhtml+xml"
     ]
+
+
+def read_metadata(document: Path) -> Metadata:
+    """The OPF's own ``<metadata>`` block: title, author, language, year, publisher.
+
+    A creator's ``opf:role`` decides whether it's an author: authors get no
+    role at all as often as they get "aut" explicitly (EPUB2 conventions
+    vary), so a missing role defaults to "aut" rather than excluding the
+    creator; a translator or other contributor is marked with a different
+    role and correctly left out. ``dc:date`` is the book's own publication
+    date, not Calibre's conversion timestamp (that lives in a separate
+    ``<meta name="calibre:timestamp">``), so its year is trustworthy as-is.
+    """
+    with zipfile.ZipFile(document) as archive:
+        container = ElementTree.fromstring(archive.read(_CONTAINER))
+        opf_path = container.find(".//c:rootfile", _CONTAINER_NS).attrib["full-path"]
+        opf = ElementTree.fromstring(archive.read(opf_path))
+    meta = opf.find(".//opf:metadata", _OPF_NS)
+    if meta is None:
+        return Metadata()
+    title = _dc_text(meta, "title")
+    authors = [
+        creator.text.strip()
+        for creator in meta.findall("dc:creator", _DC_NS)
+        if creator.text and creator.get(f"{{{_OPF_URI}}}role", "aut") == "aut"
+    ]
+    date = _dc_text(meta, "date")
+    return Metadata(
+        title=title,
+        author="; ".join(authors) or None,
+        language=_dc_text(meta, "language"),
+        year=date[:4] if date and date[:4].isdigit() else None,
+        publisher=_dc_text(meta, "publisher"),
+    )
+
+
+def _dc_text(meta: ElementTree.Element, tag: str) -> str | None:
+    element = meta.find(f"dc:{tag}", _DC_NS)
+    return element.text.strip() if element is not None and element.text else None
 
 
 _NCX_NS = {"n": "http://www.daisy.org/z3986/2005/ncx/"}

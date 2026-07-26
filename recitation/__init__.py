@@ -17,11 +17,20 @@ from typing import Protocol
 import numpy as np
 import soundfile
 
+from extraction import Metadata
 from recitation.kokoro import KokoroReciter
 from recitation.lexicon import Lexicon, draft
 from redaction import Manner, Script, Utterance
 
 __all__ = ["APPARATUS", "KokoroReciter", "Lexicon", "Reciter", "draft", "publish", "recite"]
+
+# Embedded in every published file's comment tag: metadata is otherwise a
+# dry list of facts about someone else's book, so this is the one field
+# that's fair to spend on the software that made the file, not the book.
+_ADVERTISEMENT = (
+    "Made with Lecturer (https://github.com/serverplumber/lecturer), an open-source "
+    "pipeline that turns monographs into audiobooks read in the author's own voice."
+)
 
 # Sections that are scholarly apparatus, not lecture: nobody wants ninety
 # minutes of impeccably pronounced bibliography. The CLI skips titles
@@ -141,6 +150,7 @@ def publish(
     log: Callable[[str], None] = lambda message: None,
     skip: Callable[[str], bool] = lambda title: False,
     variant: str = "book",
+    metadata: Metadata | None = None,
 ) -> Path | None:
     """Bind the recited sections: WAVs become Opus, plus an M3U playlist.
 
@@ -148,9 +158,14 @@ def publish(
     size; the playlist carries section titles and durations, in reading
     order. Conversion streams block-wise (a ninety-minute WAV must never
     sit in memory) and is skipped when the Opus is already newer than its
-    WAV. Returns the playlist path, or ``None`` if nothing was published.
+    WAV. ``metadata`` (the source document's own title/author/year/etc.,
+    from :func:`extraction.read_metadata`) is embedded as tags in both the
+    Opus files and the ``.m4b``; a re-run that only touches metadata leaves
+    already-published files untouched, same as any other WAV-mtime gate.
+    Returns the playlist path, or ``None`` if nothing was published.
     """
     audio_dir = directory / "audio" / variant
+    book_title = (metadata.title if metadata else None) or directory.resolve().name
     entries: list[tuple[Path, float, str]] = []
     reciters: set[str] = set()
     for index, section in enumerate(script.sections, start=1):
@@ -161,7 +176,7 @@ def publish(
             continue
         opus = wav.with_suffix(".opus")
         if not opus.exists() or opus.stat().st_mtime < wav.stat().st_mtime:
-            _convert(wav, opus)
+            _convert(wav, opus, metadata, book_title, section.title, index)
             log(
                 f"bound '{section.title}': "
                 f"{wav.stat().st_size >> 20} MB wav -> {opus.stat().st_size >> 20} MB opus"
@@ -181,7 +196,7 @@ def publish(
         safe = title.replace(",", "‚")  # noqa: RUF001
         lines += [f"#EXTINF:{round(duration)},{safe}", wav.with_suffix(".opus").name]
     playlist.write_text("\n".join(lines) + "\n")
-    _bind_m4b(entries, audio_dir, directory, variant, log)
+    _bind_m4b(entries, audio_dir, directory, variant, log, metadata, book_title)
     return playlist
 
 
@@ -191,6 +206,8 @@ def _bind_m4b(
     directory: Path,
     variant: str,
     log: Callable[[str], None],
+    metadata: Metadata | None,
+    book_title: str,
 ) -> None:
     """One .m4b per variant — the universal audiobook: AAC with chapter atoms.
 
@@ -206,19 +223,34 @@ def _bind_m4b(
     concat = audio_dir / ".concat.txt"
     # stems come from slugify, so no quote-escaping gymnastics needed
     concat.write_text("".join(f"file '{wav.resolve().as_posix()}'\n" for wav, _, _ in entries))
-    metadata = [";FFMETADATA1", f"title={directory.resolve().name} ({variant})"]
+    # Book and glossed variants share a title otherwise, indistinguishable
+    # in a library view; only book (the plain rendering) gets the bare title.
+    display_title = book_title if variant == "book" else f"{book_title} ({variant})"
+    tags = [";FFMETADATA1", f"title={_escape_ffmetadata(display_title)}"]
+    author = metadata.author if metadata else None
+    if author:
+        tags.append(f"artist={_escape_ffmetadata(author)}")
+        tags.append(f"album_artist={_escape_ffmetadata(author)}")
+    tags.append(f"album={_escape_ffmetadata(book_title)}")
+    tags.append("genre=Audiobook")
+    year = metadata.year if metadata else None
+    if year:
+        tags.append(f"date={_escape_ffmetadata(year)}")
+        if metadata and metadata.publisher:
+            tags.append(f"copyright={_escape_ffmetadata(f'{year} {metadata.publisher}')}")
+    tags.append(f"comment={_escape_ffmetadata(_ADVERTISEMENT)}")
     position = 0.0
     for _, duration, title in entries:
-        metadata += [
+        tags += [
             "[CHAPTER]",
             "TIMEBASE=1/1000",
             f"START={round(position * 1000)}",
             f"END={round((position + duration) * 1000)}",
-            f"title={title}",
+            f"title={_escape_ffmetadata(title)}",
         ]
         position += duration
     meta = audio_dir / ".chapters.txt"
-    meta.write_text("\n".join(metadata) + "\n")
+    meta.write_text("\n".join(tags) + "\n", encoding="utf-8")
     partial = book.with_suffix(".m4b.part")
     try:
         subprocess.run(
@@ -267,7 +299,25 @@ def _reciter_of(sig_path: Path) -> str | None:
         return None
 
 
-def _convert(wav: Path, opus: Path) -> None:
+# ffmpeg's FFMETADATA1 format reserves these characters; a literal one in a
+# title (footnote em dashes never appear here, but an apostrophe-heavy
+# chapter title like "Translator's Note" needs nothing escaped, "1484" or a
+# stray "#"/";" would) must be backslash-escaped or it corrupts the file.
+_FFMETADATA_ESCAPE = re.compile(r"([\\=;#\n])")
+
+
+def _escape_ffmetadata(value: str) -> str:
+    return _FFMETADATA_ESCAPE.sub(r"\\\1", value)
+
+
+def _convert(
+    wav: Path, opus: Path, metadata: Metadata | None, book_title: str, title: str, track: int
+) -> None:
+    """WAV -> Opus, tagged with this section's place in the book.
+
+    Attributes must be set before the first ``write`` — libsndfile bakes
+    the Vorbis comment header in at that point for a streamed OGG write.
+    """
     partial = opus.with_suffix(".opus.part")
     with (
         soundfile.SoundFile(wav) as source,
@@ -280,6 +330,16 @@ def _convert(wav: Path, opus: Path) -> None:
             subtype="OPUS",
         ) as sink,
     ):
+        sink.title = title
+        sink.album = book_title
+        sink.tracknumber = str(track)
+        sink.genre = "Audiobook"
+        sink.software = "Lecturer"
+        sink.comment = _ADVERTISEMENT
+        if metadata and metadata.author:
+            sink.artist = metadata.author
+        if metadata and metadata.year:
+            sink.date = metadata.year
         while True:
             block = source.read(1 << 20, dtype="float32")
             if not len(block):
