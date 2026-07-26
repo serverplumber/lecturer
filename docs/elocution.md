@@ -32,6 +32,8 @@ behind any line here.
 
 **Pass 1 — apparatus**
 - [ ] 3 `abbrev_list_parser` — out of scope so far (no abbreviations list in this corpus)
+  ↳ **corpus**: Tov, Meyendorff, or any Brill/Mohr Siebeck volume — they all ship a front-matter
+  abbreviations list, which is the whole trigger condition
 - [x] 4 `bibliography_entry_parser` — built
 - [x] 5 `primary_secondary_classifier` — built, hardened (apparatus corroboration)
 - [x] 6 `truncation_aligner` — not built as conceived; solved instead by
@@ -40,47 +42,144 @@ behind any line here.
 **Category 1 — identity vocabularies**
 - [x] 7 `biblical_sigla` — built
 - [ ] 8 `clavis_numbers` — not started, no evidence
+  ↳ **table, not corpus**: CPG/CPL catalogue ranges. Grammar is prefix + int + opt letter; buildable today
 - [ ] 9 `patristic_sigla` — partial: Josephus/Philo built (adjacent, own files); Irenaeus
   evidenced (`Haer.` ×8), not yet promoted to its own
+  ↳ **table**: SBL Handbook §8.3. **corpus**: Meyendorff, de Lubac, Harnack (public domain)
 - [ ] 10 `classical_sigla` — partial: one seed entry ("Num"); Suetonius, Tacitus, Lucian,
   Dio Chrysostom, Pausanias all evidenced via `citation_pairing.py`, none built yet
+  ↳ **table**: OCD front matter + LSJ authors-and-works list. **corpus**: Kingsley, Graf.
+  Not blocked — six authors are already evidenced and waiting
 - [ ] 11 `nag_hammadi_sigla` — not started, no evidence
+  ↳ **table, not corpus**: closed list, 13 codices / ~52 tractates. **corpus** (to justify it):
+  Williams, *Rethinking "Gnosticism"* or King, *What Is Gnosticism?*
 - [ ] 12 `manuscript_sigla` — not started, no evidence
+  ↳ **table, not corpus**: INTF *Kurzgefasste Liste* (GA) + Rahlfs' *Verzeichnis*.
+  **corpus**: Tov, *Textual Criticism of the Hebrew Bible*
 
 **Category 2 — intra-work locators**
 - [x] 13 `biblical_locator` — subsumed: generic `mechanical_locator`/`LOCATOR` already
   handles this shape, no dedicated component needed
 - [ ] 14 `internal_ref` — not built; evidenced (29/178 bare-siglum reuses in temple_gates'
   footnotes, plus a multi-locator bare-author case)
+  ↳ **not blocked at all** — the evidence is already measured. Frontier item.
 - [x] 15 `prose_hierarchical` — subsumed, same as 13
 - [ ] 16 `verse_line` — not started (likely subsumed too, once a corpus needs it)
+  ↳ **no source yet**: none of the candidate acquisitions below cite verse by line. Leave it.
 - [x] 17 `stephanus_locator` — built
 - [ ] 18 `bekker_locator` — not started, no evidence
+  ↳ **corpus**: Kingsley; Long & Sedley, *The Hellenistic Philosophers*
 - [ ] 19 `diels_kranz` — not started, no evidence
+  ↳ **table, not corpus**: DK is a closed numbered list. **corpus**: Kingsley (dense)
 - [ ] 20 `fragment_editor` — not started, no evidence
+  ↳ **corpus**: Kingsley (Kern/Bernabé); Long & Sedley (SVF, LS numbering)
 - [ ] 21 `nag_hammadi_locator` — not started, no evidence (stub)
+  ↳ ships with 11; same acquisition
 - [ ] 22 `qumran_locator` — not started, no evidence (stub)
+  ↳ **table**: SBL Handbook §8.3. **corpus**: Tov; Collins, *The Apocalyptic Imagination*
+  (also the closest subject-adjacency to temple_gates)
 
 **Category 3 — edition-locators**
 - [ ] 23 `migne_locator` — not started, no evidence
+  ↳ **table, not corpus**: PG 1–161 / PL 1–221 volume→author mapping.
+  **corpus**: Meyendorff (PG-dense), de Lubac (PL-relentless), Harnack (public domain)
 - [ ] 24 `critical_series_locator` — not started, no evidence
+  ↳ **corpus**: Meyendorff and de Lubac for SC; Yates for early-modern edition series
 - [ ] 25 `translation_series_locator` — not started, no evidence
+  ↳ **table**: SBL Handbook §8.3. Partial evidence already in hand — `LCL`, `Loeb Classical
+  Library`, `Ancient Christian Writers` are hardcoded in `bibliography.py`'s apparatus
+  corroboration; that list wants promoting to a real vocabulary rather than a gate's constant
 - [ ] 26 `papyri_epigraphy` — not started, no evidence (stub)
+  ↳ **corpus**: Graf, *Magic in the Ancient World* (PGM, P.Oxy., SEG, IG, CIL in one volume)
 
 **Cross-cutting**
 - [x] 29 `speakability_renderer` — informally satisfied (`System.speak_locator` per
   shape); not formalised as its own abstract layer
 - [ ] 30 `candidate_scanner` — minimal only: `Elocutor`'s merge is static, not derived
   per document beyond the bare-author case
+  ↳ **genuinely corpus-blocked**: needs ≥2 documents with *different* active sets before
+  per-document derivation beats the static merge
 - [ ] 31 `grammar_activator` — minimal only: `_bare_author_systems` is a narrow,
   single-purpose instance
+  ↳ **genuinely corpus-blocked**: same condition as 30
 - [ ] 32 `dispatcher` — minimal only: `Elocutor` is "apply-all, no escalation" — the
   build order's own stated starting point
+  ↳ **genuinely corpus-blocked**: escalation has nothing to escalate *between* until two
+  grammars collide on real text
 
 **Frontier** (next up, both already evidenced, neither blocked): finish 9/10 by
 promoting the six evidenced classical/patristic authors into their own files; build 14
 (a stateful "last-cited work" register). Everything else marked not started is waiting
 on a corpus that actually needs it, not on being built.
+
+Correction to that last sentence, which was too broad: only *some* of it is waiting on a
+corpus. See the acquisition section below for the split.
+
+### Corpus acquisition
+
+"Blocked on library" turned out to be three different conditions wearing one label:
+
+**(a) Table-blocked, not corpus-blocked** — 8, 11, 12, 19, 23, and half of 9/10/22/25.
+These are PC-over-a-static-table, structurally identical to 7 `biblical_sigla`, which is
+already built. The table is a *published authority*, not something inferred from a
+document. Nag Hammadi is a closed list of 13 codices; DK is a closed numbering; Migne is
+a volume→author mapping; GA/Rahlfs come off the INTF Liste. None of these need a book to
+exist before the grammar can. What a book decides is whether writing the grammar was
+*worth it* — a different question, answered by the listening list, not the build order.
+
+**(b) Genuinely corpus-blocked** — 1 (second dialect), 3, 30, 31, 32. Heuristic or
+stateful; no table substitutes. 30/31/32 in particular need at least two documents with
+genuinely different active sets before per-document derivation beats the static merge.
+
+**(c) Not blocked** — 14. The evidence was measured months ago (29/178). This is just work.
+
+#### Authority tables — acquire first
+
+- **SBL Handbook of Style, 2nd ed.** — §8.3 is the master abbreviation list covering
+  biblical (7), patristic (9), classical (10), Qumran (22), Nag Hammadi (11) and the
+  translation series (25). Highest value per acquisition on this page: it is, in effect,
+  the spec that 7 already implements one slice of.
+- **OCD** front-matter abbreviations + **LSJ** authors-and-works list → 10
+- **INTF Kurzgefasste Liste** (Gregory-Aland) + **Rahlfs, Verzeichnis** → 12
+- **Clavis Patrum Graecorum / Latinorum** — number ranges → 8
+
+#### Monographs — coverage per volume
+
+Chosen so each volume lights up ≥2 unbuilt components. Bold = the component this book is
+the primary source for.
+
+| Volume | Unblocks |
+|---|---|
+| Kingsley, *Ancient Philosophy, Mystery, and Magic* | **19**, **20**, **26**, 18, 10, 9, 17 |
+| Meyendorff, *A Study of Gregory Palamas* | **23** (PG-dense), **24** (SC), 9, 3 |
+| de Lubac, *Medieval Exegesis* | **23** (PL), 24, 9, 14 |
+| Tov, *Textual Criticism of the Hebrew Bible* | **12**, **22**, 3 |
+| Collins, *The Apocalyptic Imagination* | 22, 7, 9 — closest subject-adjacency to temple_gates |
+| Williams, *Rethinking "Gnosticism"* / King, *What Is Gnosticism?* | **11**, **21**, 9 |
+| Graf, *Magic in the Ancient World* | **26**, 10 |
+| Yates, *Giordano Bruno and the Hermetic Tradition* | 10, 24, + Nock-Festugière `CH` sigla (a new locator shape) |
+| Long & Sedley, *The Hellenistic Philosophers* | **20** (SVF, LS), 19, 18 |
+
+Two public-domain volumes, free on archive.org and maximally soupy — pre-1930 scholarship
+cites Migne and manuscript sigla the way modern scholarship cites DOIs, so the density per
+page is higher than anything written after 1960, at zero acquisition friction:
+
+- **Harnack, *History of Dogma*** → 23, 9, 3
+- **Lightfoot, *The Apostolic Fathers*** → 23, 12, 9
+
+For **1's second dialect** specifically, none of the above helps: they're all notes-style,
+the one style already confirmed. Confirming a *second* named style needs an author-date
+book — Stark, *The Rise of Christianity*, or most SBL Press social-scientific volumes.
+This is the acquisition that turns `sniff_style` from a confirm-or-abstain gate into the
+dialect classifier the dependency tree already assumes at three downstream points (4, 13,
+14), so it's worth more than its single checklist line suggests.
+
+#### Selection rule
+
+Corpus is not a neutral sample; it's a specification. A book that would never be listened
+to teaches the dispatcher to handle shapes that will never be rendered. Weight every
+acquisition by whether it's on the listening list, and start with Kingsley — one volume,
+five unbuilt components, and it was already queued on prose merit.
 
 #### Pass 0 — sniffers
 
