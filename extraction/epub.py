@@ -265,19 +265,63 @@ def _resolve_href(path: str, href: str) -> tuple[str, str] | None:
     return target_path, fragment
 
 
+def _effective_id(anchor: Tag) -> str | None:
+    """An anchor's own id, or one borrowed from an id-only sibling right before it.
+
+    Project Gutenberg's ebookmaker splits a noteref/return-link's id and
+    href across two adjacent ``<a>`` tags — an empty "bookmark" anchor
+    carrying just the id, immediately followed by the actual link — rather
+    than carrying both on one tag the way other conversions do (Yates,
+    Coetzee). The bookmark always comes first.
+    """
+    if anchor.get("id"):
+        return anchor["id"]
+    prev = anchor.find_previous_sibling("a")
+    if prev is not None and prev.get("id") and not prev.get("href"):
+        return prev["id"]
+    return None
+
+
 def _links_back(target: Tag, target_path: str, path: str, own_id: str) -> bool:
-    """Whether ``target`` (or a link nested inside it) points back at ``(path, own_id)``.
+    """Whether ``target`` (or a link near it) points back at ``(path, own_id)``.
 
     ``target`` itself carries the id being linked to; the actual ``href``
     that should round-trip back to the caller can sit on ``target`` itself
-    (a note number that *is* an ``<a>``) or on a descendant ``<a>`` (a note
-    body ``<div>`` whose own number is one of its children) — either way,
-    still this note's own back-reference.
+    (a note number that *is* an ``<a>``), on a descendant ``<a>`` (a note
+    body ``<div>`` whose own number is one of its children), or — Project
+    Gutenberg's split-anchor convention — nowhere inside ``target`` at all,
+    when ``target`` is itself only an empty id-only bookmark and its actual
+    "return" link is a later sibling under the same parent. Only fall out
+    to the parent's own children when ``target`` has nothing of its own to
+    offer; a target with real descendant links is trusted on those alone.
     """
     candidates = target.find_all("a", href=True)
     if target.name == "a" and target.get("href"):
         candidates = [target, *candidates]
+    if not candidates and target.parent is not None:
+        candidates = target.parent.find_all("a", href=True)
     return any(_resolve_href(target_path, a["href"]) == (path, own_id) for a in candidates)
+
+
+def _is_note_like(tag: Tag) -> bool:
+    """Whether ``tag`` or a near ancestor carries a footnote/endnote CSS class.
+
+    Used only to arbitrate a same-file pair, where there's no shared notes
+    file to read the note/noteref split off of. Nearly every EPUB
+    conversion that marks footnotes with plain anchor pairs instead of
+    ``epub:type`` semantics still names the note's own wrapper with a class
+    naming it as one (Harnack's Project Gutenberg edition wraps each in
+    ``<blockquote class="footnote">`` — a few levels above the id-bearing
+    anchor itself, hence checking ancestors, not just the tag itself.
+    """
+    node = tag
+    for _ in range(4):
+        if node is None or not isinstance(node, Tag):
+            break
+        if "note" in " ".join(node.get("class") or []).lower():
+            return True
+        node = node.parent
+    return False
 
 
 def _pull_href_footnotes(paths: list[str], soups: list[BeautifulSoup]) -> list[Footnote]:
@@ -288,27 +332,34 @@ def _pull_href_footnotes(paths: list[str], soups: list[BeautifulSoup]) -> list[F
     ``epub:type``/``role`` markup, so ``_pull_footnotes`` finds nothing; the
     notes chapter itself is often ``<div>``-based rather than ``<p>``-based
     too, so ``pull_endnotes``'s bare-``<sup>``-plus-heading heuristic
-    (matched by section and number) misses it as well. Read reciprocity
-    directly instead: an anchor with an id and an href is a genuine
-    noteref/note pair only if the element its ``href`` resolves to *also*
-    links back to this anchor's own id — an ordinary cross-reference (an
-    index's page-number link, a "see also") never does, since only a
-    footnote apparatus round-trips both ways in this markup style. Which
-    side of a confirmed pair is "the note" (as opposed to "the noteref",
-    left in running text) is read off which file the pair's two ends
-    actually live in: a shared notes chapter is the target of every
-    chapter's own pairs, so it accumulates far more pair-endpoints than any
-    one body chapter does — no heading-text guess needed.
+    (matched by section and number) misses it as well. An anchor's "own id"
+    for this purpose comes from :func:`_effective_id`, not just its own
+    ``id`` attribute — Project Gutenberg's ebookmaker splits that id onto a
+    separate sibling bookmark tag. Read reciprocity directly: an anchor
+    with an (effective) id and an href is a genuine noteref/note pair only
+    if the element its ``href`` resolves to *also* links back to this
+    anchor's own id — an ordinary cross-reference (an index's page-number
+    link, a "see also") never does, since only a footnote apparatus
+    round-trips both ways in this markup style. Which side of a confirmed
+    pair is "the note" (as opposed to "the noteref", left in running text)
+    is read off which file the pair's two ends actually live in: a shared
+    notes chapter is the target of every chapter's own pairs, so it
+    accumulates far more pair-endpoints than any one body chapter does —
+    no heading-text guess needed.
     """
     ids: dict[tuple[str, str], Tag] = {}
     for path, soup in zip(paths, soups, strict=True):
         for tag in soup.find_all(id=True):
             ids[(path, tag["id"])] = tag
 
+    by_effective_id: dict[tuple[str, str], Tag] = {}
     pairs: dict[frozenset, tuple[str, str, str, str]] = {}
     for path, soup in zip(paths, soups, strict=True):
-        for anchor in soup.find_all("a", id=True, href=True):
-            own_id = anchor["id"]
+        for anchor in soup.find_all("a", href=True):
+            own_id = _effective_id(anchor)
+            if own_id is None:
+                continue
+            by_effective_id[(path, own_id)] = anchor
             resolved = _resolve_href(path, anchor["href"])
             if resolved is None:
                 continue
@@ -332,7 +383,18 @@ def _pull_href_footnotes(paths: list[str], soups: list[BeautifulSoup]) -> list[F
         elif path == notes_path and target_path != notes_path:
             note_id, note_path, ref_path, ref_id = own_id, path, target_path, target_frag
         else:
-            continue  # both ends in (or both out of) the notes file: not a real pair
+            # No shared notes file to arbitrate (same file on both ends —
+            # some books, Harnack's Project Gutenberg edition among them,
+            # keep each chapter's own notes local rather than centralised).
+            # Fall back to which side's own CSS class actually says "note".
+            target_tag = ids.get((target_path, target_frag))
+            self_tag = by_effective_id.get((path, own_id))
+            if target_tag is not None and _is_note_like(target_tag):
+                note_id, note_path, ref_path, ref_id = target_frag, target_path, path, own_id
+            elif self_tag is not None and _is_note_like(self_tag):
+                note_id, note_path, ref_path, ref_id = own_id, path, target_path, target_frag
+            else:
+                continue
         note = ids[(note_path, note_id)]
         container = note if note.name in _BLOCK_TAGS else note.find_parent(_BLOCK_TAGS)
         if container is None:
@@ -342,7 +404,7 @@ def _pull_href_footnotes(paths: list[str], soups: list[BeautifulSoup]) -> list[F
                 backlink.extract()
         footnotes.append(Footnote(ref=note_id, text=container.get_text(" ", strip=True)))
         container.extract()
-        anchor = ids[(ref_path, ref_id)]
+        anchor = by_effective_id[(ref_path, ref_id)]
         anchor.replace_with(f"[^{note_id}]")
     return footnotes
 
