@@ -5,10 +5,13 @@ points at an OPF manifest whose spine lists the chapters in reading order.
 Footnotes are marked up with ``epub:type`` (footnote/endnote/rearnote) or
 DPUB-ARIA ``role`` attributes, anchored in the running text by ``noteref``
 links. Books without any semantic markup fall back to the endnotes-chapter
-heuristics in :mod:`extraction.endnotes`.
+heuristics in :mod:`extraction.endnotes`, and failing that, to a lower-level
+reciprocal-link reading (:func:`_pull_href_footnotes`) for notes cross-linked
+by nothing but a plain ``<a id=.. href=..>`` pair on each side.
 """
 
 import zipfile
+from collections import Counter
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
 from xml.etree import ElementTree
@@ -33,7 +36,7 @@ _DC_NS = {"dc": "http://purl.org/dc/elements/1.1/"}
 
 _NOTE_TYPES = frozenset({"footnote", "endnote", "rearnote", "doc-footnote", "doc-endnote"})
 _NOTEREF_TYPES = frozenset({"noteref", "doc-noteref"})
-_BLOCK_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "blockquote"]
+_BLOCK_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "blockquote", "div"]
 _HEADING_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
 _MAX_TITLE_LENGTH = 60
 
@@ -50,6 +53,8 @@ class EpubExtractor:
             _mark_noterefs(soup)
         if not footnotes:
             footnotes = pull_endnotes(soups)
+        if not footnotes:
+            footnotes = _pull_href_footnotes(paths, soups)
         if not leaves:
             bibliography = []
             for soup in soups:
@@ -251,31 +256,191 @@ def _mark_noterefs(soup: BeautifulSoup) -> None:
         anchor.replace_with(f"[^{ref}]")
 
 
+def _resolve_href(path: str, href: str) -> tuple[str, str] | None:
+    """A same- or cross-file ``href``'s target as (path, fragment); ``None`` if bare."""
+    file_part, sep, fragment = href.partition("#")
+    if not sep or not fragment:
+        return None
+    target_path = path if not file_part else str(PurePosixPath(path).parent / unquote(file_part))
+    return target_path, fragment
+
+
+def _links_back(target: Tag, target_path: str, path: str, own_id: str) -> bool:
+    """Whether ``target`` (or a link nested inside it) points back at ``(path, own_id)``.
+
+    ``target`` itself carries the id being linked to; the actual ``href``
+    that should round-trip back to the caller can sit on ``target`` itself
+    (a note number that *is* an ``<a>``) or on a descendant ``<a>`` (a note
+    body ``<div>`` whose own number is one of its children) — either way,
+    still this note's own back-reference.
+    """
+    candidates = target.find_all("a", href=True)
+    if target.name == "a" and target.get("href"):
+        candidates = [target, *candidates]
+    return any(_resolve_href(target_path, a["href"]) == (path, own_id) for a in candidates)
+
+
+def _pull_href_footnotes(paths: list[str], soups: list[BeautifulSoup]) -> list[Footnote]:
+    """Fallback for notes cross-linked by plain ``<a id=.. href=..>`` pairs, no semantics.
+
+    Some conversions link a noteref to its note with nothing but a pair of
+    ordinary anchors, each carrying the other's id in its own ``href`` — no
+    ``epub:type``/``role`` markup, so ``_pull_footnotes`` finds nothing; the
+    notes chapter itself is often ``<div>``-based rather than ``<p>``-based
+    too, so ``pull_endnotes``'s bare-``<sup>``-plus-heading heuristic
+    (matched by section and number) misses it as well. Read reciprocity
+    directly instead: an anchor with an id and an href is a genuine
+    noteref/note pair only if the element its ``href`` resolves to *also*
+    links back to this anchor's own id — an ordinary cross-reference (an
+    index's page-number link, a "see also") never does, since only a
+    footnote apparatus round-trips both ways in this markup style. Which
+    side of a confirmed pair is "the note" (as opposed to "the noteref",
+    left in running text) is read off which file the pair's two ends
+    actually live in: a shared notes chapter is the target of every
+    chapter's own pairs, so it accumulates far more pair-endpoints than any
+    one body chapter does — no heading-text guess needed.
+    """
+    ids: dict[tuple[str, str], Tag] = {}
+    for path, soup in zip(paths, soups, strict=True):
+        for tag in soup.find_all(id=True):
+            ids[(path, tag["id"])] = tag
+
+    pairs: dict[frozenset, tuple[str, str, str, str]] = {}
+    for path, soup in zip(paths, soups, strict=True):
+        for anchor in soup.find_all("a", id=True, href=True):
+            own_id = anchor["id"]
+            resolved = _resolve_href(path, anchor["href"])
+            if resolved is None:
+                continue
+            target_path, target_frag = resolved
+            target = ids.get((target_path, target_frag))
+            if target is None or not _links_back(target, target_path, path, own_id):
+                continue
+            key = frozenset({(path, own_id), (target_path, target_frag)})
+            pairs[key] = (path, own_id, target_path, target_frag)
+
+    if not pairs:
+        return []
+
+    touches = Counter(path for pair in pairs.values() for path in (pair[0], pair[2]))
+    notes_path, _ = touches.most_common(1)[0]
+
+    footnotes = []
+    for path, own_id, target_path, target_frag in pairs.values():
+        if target_path == notes_path and path != notes_path:
+            note_id, note_path, ref_path, ref_id = target_frag, target_path, path, own_id
+        elif path == notes_path and target_path != notes_path:
+            note_id, note_path, ref_path, ref_id = own_id, path, target_path, target_frag
+        else:
+            continue  # both ends in (or both out of) the notes file: not a real pair
+        note = ids[(note_path, note_id)]
+        container = note if note.name in _BLOCK_TAGS else note.find_parent(_BLOCK_TAGS)
+        if container is None:
+            continue
+        for backlink in container.find_all("a", href=True):
+            if _resolve_href(note_path, backlink["href"]) == (ref_path, ref_id):
+                backlink.extract()
+        footnotes.append(Footnote(ref=note_id, text=container.get_text(" ", strip=True)))
+        container.extract()
+        anchor = ids[(ref_path, ref_id)]
+        anchor.replace_with(f"[^{note_id}]")
+    return footnotes
+
+
 def _running_text(soup: BeautifulSoup) -> str:
     """Flatten a chapter to plain text, one blank line between blocks."""
-    blocks = _top_level_blocks(soup)
-    if not blocks:
-        return soup.get_text(" ", strip=True)
-    return _blocks_text(blocks)
+    return _blocks_text(_top_level_blocks(soup))
 
 
-def _top_level_blocks(soup: BeautifulSoup) -> list[Tag]:
-    return [b for b in soup.find_all(_BLOCK_TAGS) if b.find_parent(_BLOCK_TAGS) is None]
+def _top_level_blocks(container: Tag) -> list[tuple[Tag, str]]:
+    """The document's own paragraph-level units: (owning tag, text) pairs, in order.
+
+    Some conversions wrap every paragraph in its own ``<div class="...">``
+    rather than a ``<p>``, with an outer wrapper ``<div>`` around the whole
+    chapter body (seen in several Routledge/Taylor & Francis EPUBs — Yates'
+    *Lull and Bruno*, *Ideas and Ideals*, Coetzee's *Stranger Shores*). A
+    block tag can also — in malformed but real markup, e.g. an epigraph
+    couplet in Couliano's *Eros and Magic* — own text of its own *and* nest
+    a further block tag inside it (a heading directly wrapping a citation
+    line, ended by a stray ``<p>``). Splitting only at block-tag boundaries
+    (rather than picking either the outermost or the innermost block
+    wholesale) handles both: a div-wrapped paragraph and a bare ``<p>``
+    each become their own single unit; a block tag with mixed content
+    contributes its own directly-owned text as one unit and each nested
+    block tag as further units, in document order, rather than either
+    merging everything into one blob (losing paragraph structure) or
+    silently dropping the outer tag's own text (losing content).
+    """
+    units: list[tuple[Tag, str]] = []
+    buffer: list[str] = []
+
+    def flush(owner: Tag) -> None:
+        text = " ".join("".join(buffer).split())
+        # Text owned by ``container`` itself — never a real paragraph tag,
+        # only the placeholder scope for content encountered before the
+        # first block tag anywhere in the document (an XML declaration, a
+        # leaked <title>) — isn't a paragraph unit; it also can't safely be
+        # attributed a real owner, since it sits outside every block tag.
+        if text and owner is not container:
+            units.append((owner, text))
+        buffer.clear()
+
+    def walk(node: Tag, owner: Tag) -> None:
+        # A non-block tag (span, html, body, an unrecognised wrapper...) is
+        # descended into transparently, under the *same* owner/buffer, so a
+        # block tag nested arbitrarily deep inside one is still found rather
+        # than the whole wrapper being flattened by one get_text() call —
+        # the bug an earlier version of this function had, which merged an
+        # entire chapter's headings and paragraphs into a single unit
+        # whenever they sat under so much as a bare ``<body>``.
+        for child in node.children:
+            if isinstance(child, Tag):
+                if child.name in _BLOCK_TAGS:
+                    flush(owner)
+                    walk(child, child)
+                    flush(child)
+                else:
+                    walk(child, owner)
+            else:
+                buffer.append(str(child))
+
+    walk(container, container)
+    flush(container)
+    return units
 
 
-def _blocks_text(blocks: list[Tag]) -> str:
-    return "\n\n".join(text for b in blocks if (text := b.get_text(" ", strip=True)))
+def _blocks_text(blocks: list[tuple[Tag, str]]) -> str:
+    return "\n\n".join(text for _, text in blocks)
 
 
-def _find_leaf_block(blocks: list[Tag], fragment: str) -> int | None:
+def _find_leaf_block(
+    blocks: list[tuple[Tag, str]], fragment: str, soup: BeautifulSoup
+) -> int | None:
     """The index of the top-level block a leaf's fragment id resolves to.
 
-    The id usually sits on the block itself (a heading), sometimes on an
-    inline anchor nested inside it (a bookmark right before the heading
-    text) — either way it's still this block's own content.
+    Resolves the id to its nearest enclosing block tag, then picks the
+    first unit whose owner is that tag or comes after it in document order
+    — rather than a pure containment check, which breaks when the id's own
+    block produced no unit at all: a bookmark anchor plus a full-page
+    illustration and nothing else (real markup, in one Yates EPUB's
+    chapter-opener pages) is an empty paragraph, so no owner is ever equal
+    to or a descendant of it, even though the fragment is completely valid
+    and the next block over — the actual chapter title — is exactly the
+    right split point. Document order is read off ``soup.find_all`` over
+    every block tag, wrapper and leaf alike, since a walk that assigns each
+    block-tag element to a unit only when it's non-empty preserves that
+    same relative order among the ones that do.
     """
-    for i, block in enumerate(blocks):
-        if block.get("id") == fragment or block.find(id=fragment) is not None:
+    target = soup.find(id=fragment)
+    if target is None:
+        return None
+    holder = target if target.name in _BLOCK_TAGS else target.find_parent(_BLOCK_TAGS)
+    if holder is None:
+        return None
+    order = {id(tag): i for i, tag in enumerate(soup.find_all(_BLOCK_TAGS))}
+    holder_order = order[id(holder)]
+    for i, (owner, _) in enumerate(blocks):
+        if order[id(owner)] >= holder_order:
             return i
     return None
 
@@ -336,7 +501,7 @@ def _split_sections(
             continue
 
         bounds = sorted(
-            (0 if fragment is None else (_find_leaf_block(blocks, fragment) or 0), index)
+            (0 if fragment is None else (_find_leaf_block(blocks, fragment, soup) or 0), index)
             for index, fragment in own_leaves
         )
         if bounds[0][0] > 0:
