@@ -12,16 +12,20 @@ deliberately not inserted unless a sample proves the bare numbers
 ambiguous, matching how these are actually read aloud. The siglum's
 spoken form ("1 Cor" -> "First Corinthians", "Or." -> "Oration") needs a
 vocabulary, which is each system's own business. Closed, universal,
-enumerable ones (``biblical.py``, ``stephanus.py``, and in time Bekker,
-Diels-Kranz) get a hardcoded table like this module's default locator;
-open ones — classical author-work abbreviations, unit systems — get a
-hand-editable, LLM-drafted map instead, additive and never-overwriting,
-on the lexicon-draft pattern.
+enumerable ones (``biblical.py``, ``stephanus.py``, ``diels_kranz.py``,
+and in time Bekker) get a hardcoded table like this module's default
+locator; open ones — classical author-work abbreviations, unit systems —
+get a hand-editable, LLM-drafted map instead, additive and
+never-overwriting, on the lexicon-draft pattern. A third shape has no
+table at all: ``PatternSystem`` (``qumran.py``) matches a generative
+citation shape and computes its spoken form by parsing the match, for
+vocabularies too large to enumerate.
 
-Each system's citations are matched against its own siglum table, so an
-abbreviation not yet in the table simply never matches, rather than
-matching and then guessing. Leaving it untouched until a draft sweep or
-hand edit adds it beats pronouncing it wrong with false confidence.
+Each system's citations are matched against its own siglum table (or, for
+a ``PatternSystem``, its own shape), so an abbreviation not yet covered
+simply never matches, rather than matching and then guessing. Leaving it
+untouched until a draft sweep or hand edit adds it beats pronouncing it
+wrong with false confidence.
 
 All systems are matched in one combined pass, not one sequential pass
 per system (see ``Elocutor``/``_merge``) — a separate pass per system
@@ -145,6 +149,26 @@ def stephanus_locator(locator: str) -> str:
     return "".join(pieces)
 
 
+_DK_UNIT_RE = re.compile(r"(\d+)\s?([AB])\s?(\d+)")
+# A Diels-Kranz locator: the chapter number assigned to a Presocratic
+# philosopher, then A (testimonia) or B (fragments), then the item number
+# within that letter — "31B112", "47A1". A space between the parts is usual
+# but not universal in this corpus's OCR ("47A1" with none at all), so it's
+# optional throughout rather than assumed.
+DIELS_KRANZ_LOCATOR = r"\d+\s?[AB]\s?\d+"
+
+
+def diels_kranz_locator(locator: str) -> str:
+    """Speak a Diels-Kranz citation: chapter, letter, item number.
+
+    "31 B112" -> "thirty-one, B, one hundred twelve". The letter is
+    capitalised (it already is, in this grammar) so a TTS reads it as a
+    letter name.
+    """
+    chapter, letter, item = _DK_UNIT_RE.match(locator).groups()
+    return f"{_spell(int(chapter))}, {letter}, {_spell(int(item))}"
+
+
 @dataclass
 class System:
     """One abbreviation system Elocutor can speak.
@@ -159,6 +183,42 @@ class System:
     sigla: Mapping[str, str]
     locator: str = LOCATOR
     speak_locator: Callable[[str], str] = mechanical_locator
+
+
+_QUMRAN_RE = re.compile(r"(\d{1,2})Q(\d{1,4})")
+# A bare Qumran document number: cave, then "Q", then the document number —
+# no locator, since real citations in this corpus are almost always bare
+# ("4Q246"); see ``qumran.py`` for the fuller shape and what's deliberately
+# not covered yet.
+QUMRAN_PATTERN = r"\d{1,2}Q\d{1,4}"
+
+
+def speak_qumran(citation: str) -> str:
+    """Speak a bare Qumran citation: "4Q246" -> "Qumran cave four, two hundred forty-six"."""
+    cave, document = _QUMRAN_RE.match(citation).groups()
+    return f"Qumran cave {_spell(int(cave))}, {_spell(int(document))}"
+
+
+@dataclass
+class PatternSystem:
+    """A system recognised by a generative shape, not looked up in a table.
+
+    Every other system here matches a small, enumerable siglum (a finite
+    dictionary of biblical books, Platonic dialogues, ...) and only the
+    locator that follows varies in content. Qumran document numbers don't
+    fit that: eleven caves, hundreds of numbered or letter-suffixed
+    documents in each, no fixed vocabulary to enumerate — "the siglum" and
+    "the locator" aren't even separable pieces, since the document number
+    is part of the citation's identity, not a pointer into it. So instead
+    of a siglum table, ``pattern`` matches a whole citation in one regex,
+    and ``speak`` computes its spoken form directly from the matched text
+    rather than by dictionary lookup, the same way ``diels_kranz_locator``
+    parses rather than looks up its own citation's pieces.
+    """
+
+    name: str
+    pattern: str
+    speak: Callable[[str], str]
 
 
 def bare_author_system(authors: Iterable[str]) -> System:
@@ -190,7 +250,14 @@ class _Entry:
     system: System
 
 
-def _merge(systems: Sequence[System]) -> tuple[re.Pattern[str], list[_Entry]]:
+@dataclass
+class _PatternEntry:
+    system: PatternSystem
+
+
+def _merge(
+    systems: Sequence[System | PatternSystem],
+) -> tuple[re.Pattern[str], list[_Entry | _PatternEntry]]:
     """One pattern for every system's citations, matched in a single scan.
 
     A sequential pass per system would let a later, narrower pattern's
@@ -223,28 +290,41 @@ def _merge(systems: Sequence[System]) -> tuple[re.Pattern[str], list[_Entry]]:
     in the order given before sorting by length. A real "Num" citation
     for the losing system, in a corpus that cites both, is the one case
     this can't get right — that needs context no siglum table carries.
+
+    A ``PatternSystem`` has no siglum to enumerate, so it contributes
+    exactly one branch — its whole ``pattern`` — placed after every
+    table-driven branch regardless of length. That ordering only matters
+    where a generative shape could otherwise shadow a literal siglum; none
+    of this project's ``PatternSystem`` entries share a prefix with any
+    table siglum, so it hasn't had to be adjudicated yet.
     """
-    entries = [
+    entries: list[_Entry | _PatternEntry] = [
         _Entry(siglum, spoken, system)
         for system in systems
+        if isinstance(system, System)
         for siglum, spoken in system.sigla.items()
     ]
     entries.sort(key=lambda entry: len(entry.siglum), reverse=True)
+    entries.extend(_PatternEntry(system) for system in systems if isinstance(system, PatternSystem))
     if not entries:
         return re.compile(r"(?!)"), []
-    # An abbreviation is followed by an optional period ("Num. 8.10") or
-    # nothing at all ("1 Cor 2:10"); a bare author name cited with no
-    # siglum ("Cassius Dio, 57.25.8", see ``bare_author_system``) is
-    # followed by a comma instead — widened here rather than given its own
-    # branch shape, since the separator is the only thing that differs.
-    # A single literal space, not ``\s+``: extraction joins paragraphs with
-    # blank lines, and ``\s+`` would let a siglum-shaped word ending one
-    # paragraph match across the break into a locator-shaped number
-    # starting the next.
-    branches = (
-        rf"(?P<sig{i}>{re.escape(entry.siglum)})[,.]? (?P<loc{i}>{entry.system.locator})"
-        for i, entry in enumerate(entries)
-    )
+    branches = []
+    for i, entry in enumerate(entries):
+        if isinstance(entry, _PatternEntry):
+            branches.append(rf"(?P<pat{i}>{entry.system.pattern})")
+            continue
+        # An abbreviation is followed by an optional period ("Num. 8.10") or
+        # nothing at all ("1 Cor 2:10"); a bare author name cited with no
+        # siglum ("Cassius Dio, 57.25.8", see ``bare_author_system``) is
+        # followed by a comma instead — widened here rather than given its
+        # own branch shape, since the separator is the only thing that
+        # differs. A single literal space, not ``\s+``: extraction joins
+        # paragraphs with blank lines, and ``\s+`` would let a siglum-shaped
+        # word ending one paragraph match across the break into a
+        # locator-shaped number starting the next.
+        branches.append(
+            rf"(?P<sig{i}>{re.escape(entry.siglum)})[,.]? (?P<loc{i}>{entry.system.locator})"
+        )
     return re.compile(rf"\b(?:{'|'.join(branches)})\b"), entries
 
 
@@ -256,7 +336,7 @@ class Elocutor:
     see the final expanded prose rather than the unexpanded shorthand.
     """
 
-    def __init__(self, systems: Sequence[System]) -> None:
+    def __init__(self, systems: Sequence[System | PatternSystem]) -> None:
         self.systems = systems
         self._pattern, self._entries = _merge(systems)
 
@@ -280,6 +360,10 @@ class Elocutor:
         )
 
     def _replace(self, match: re.Match[str]) -> str:
-        index = int(match.lastgroup.removeprefix("loc"))
+        group = match.lastgroup
+        # "sig{i}"/"loc{i}"/"pat{i}" share a three-character prefix.
+        index = int(group[3:])
         entry = self._entries[index]
-        return f"{entry.spoken} {entry.system.speak_locator(match.group(match.lastgroup))}"
+        if isinstance(entry, _PatternEntry):
+            return entry.system.speak(match.group(group))
+        return f"{entry.spoken} {entry.system.speak_locator(match.group(group))}"
