@@ -70,17 +70,19 @@ weave them into the text as spoken digressions. TTS will start with
   runs DeepSeek-OCR even over a PDF with a perfect text layer, making it a poor general
   front door and a fit only for an actual blob. **olmOCR** always runs a 7B vision model
   per page with no documented footnote handling — a last resort for genuinely degraded
-  archival scans, not general use. None of this is wired in: every PDF currently in
-  `texts/` is born-digital with a real outline and font profile (`pdf.py` already handles
-  all four cleanly), and the one file with no extractor at all — the `.djvu` of *Eros and
-  Magic* — duplicates a title already extracted from its EPUB. The router needs no new
-  code when a real blob shows up: `pdf.py` already computes the three signals that
-  jointly mean "this is a blob" (`doc.get_toc()` empty, `_font_profile`'s `note_size`
-  coming back `None`, `_pairing_holds` failing). Parked past that, too: the real blobs
-  waiting to be transcribed aren't English, and every closed-vocabulary system built so
-  far — `BIBLIOGRAPHY_TITLE`'s regex just above, `biblical.py`'s SBL sigla, `stephanus.py`
-  — is English/Latin-corpus-shaped in ways a non-English blob would immediately expose.
-  Worth revisiting once internationalization is underway, not before.
+  archival scans, not general use. None of this is wired in yet, but the corpus has since
+  grown real forcing cases — Fritz Graf's *Magic in the Ancient World* and Yates' *Art of
+  Memory* and *Lull and Bruno* are genuine blobs (`pdf.py`'s three-signal test —
+  `doc.get_toc()` empty, `_font_profile`'s `note_size` coming back `None`,
+  `_pairing_holds` failing — holds for all three). Michael Allen Williams' *Rethinking
+  Gnosticism* and the PDF duplicate of Couliano's *Eros and Magic* are a narrower case:
+  a real text layer, no OCR needed, but no embedded outline at all (only two of the three
+  signals) — exactly Marker's fit, since `disable_ocr` reuses that text layer rather than
+  discarding it. All of these are English, unlike the non-English blobs
+  `BIBLIOGRAPHY_TITLE`'s regex and the other closed-vocabulary systems above were
+  originally parked for — internationalization is no longer the blocker for this group;
+  actually wiring Marker in is. The one file with no extractor at all — the `.djvu` of
+  *Eros and Magic* — still just duplicates a title already extracted from its EPUB.
 - `redaction/` — redactional layers (`Redactor`s, applied in order) reworking the
   extraction into a `Script` of `Utterance`s tagged with a delivery `Manner`, ready for
   the TTS. Named for redaction criticism. Current layers, in order: `SeamMender` (joins

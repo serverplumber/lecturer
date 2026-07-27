@@ -175,18 +175,25 @@ def _split_sections(
     body_size: float,
     furniture: set[str],
 ) -> list[Section]:
-    """Divide the pages into sections along the PDF outline's top level.
+    """Divide the pages into sections along the PDF outline's own leaves.
 
-    Outline entries before the first body-looking one (a numbered chapter,
-    "Introduction", "Part …") are lumped into a single front matter
-    section. Without an outline the whole book is one section. A section
-    whose title reads as a bibliography gets its text rebuilt from
-    ``pages`` by hanging-indent geometry instead of ``page_texts``' plain
-    per-block paragraphs — see :func:`_bibliography_entries`.
+    A bookmark with a deeper-level entry immediately after it is a Part,
+    not a chapter — only leaves become sections, the same call
+    :func:`extraction.epub._nav_leaves` makes for an EPUB's nav tree, so a
+    Part heading doesn't swallow every chapter beneath it into one section
+    spanning several. Outline entries before the first body-looking one (a
+    numbered chapter, "Introduction", "Part …") are lumped into a single
+    front matter section. Without an outline the whole book is one
+    section. A section whose title reads as a bibliography gets its text
+    rebuilt from ``pages`` by hanging-indent geometry instead of
+    ``page_texts``' plain per-block paragraphs — see
+    :func:`_bibliography_entries`.
     """
     entries = []
-    for level, title, page in outline:
-        if level != 1 or not 1 <= page <= len(page_texts):
+    for i, (level, title, page) in enumerate(outline):
+        if not 1 <= page <= len(page_texts):
+            continue
+        if i + 1 < len(outline) and outline[i + 1][0] > level:
             continue
         # Only starts that advance make a section: stray bookmarks pointing
         # backwards ("Blank Page" links are common) would otherwise create
