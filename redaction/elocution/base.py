@@ -193,10 +193,27 @@ _QUMRAN_RE = re.compile(r"(\d{1,2})Q(\d{1,4})")
 QUMRAN_PATTERN = r"\d{1,2}Q\d{1,4}"
 
 
+def _spell_digits(digits: str) -> str:
+    """Each digit its own word, hyphen-joined: "246" -> "two-four-six"."""
+    return "-".join(_ONES[int(d)] for d in digits)
+
+
 def speak_qumran(citation: str) -> str:
-    """Speak a bare Qumran citation: "4Q246" -> "Qumran cave four, two hundred forty-six"."""
+    """Speak a bare Qumran citation: "4Q246" -> "four Q, two-four-six".
+
+    Digit-by-digit, call-sign style, not a cardinal number — the same
+    reason a flight number or a tail number is read "two-four-six" and not
+    "two hundred forty-six": it's dictation, meant to be taken down digit
+    by digit, not parsed as a quantity. Also sidesteps "eleven" versus "one
+    one" for a two-digit cave number, the ambiguity call signs read
+    digit-by-digit to avoid in the first place. The "Q" already signals
+    Qumran in context the same way the written siglum does, so it isn't
+    narrated as "cave" either — see ``mechanical_locator``'s own docstring
+    for why a label isn't added unless a sample proves the bare numbers
+    ambiguous.
+    """
     cave, document = _QUMRAN_RE.match(citation).groups()
-    return f"Qumran cave {_spell(int(cave))}, {_spell(int(document))}"
+    return f"{_spell_digits(cave)} Q, {_spell_digits(document)}"
 
 
 @dataclass

@@ -5,8 +5,9 @@ is the document catalogued 246th from Cave 4. Eleven caves, hundreds of
 numbered documents in each — there's no finite siglum table to transcribe
 the way there is for biblical books or Plato's dialogues, so this is a
 ``PatternSystem``: the citation shape is matched directly and its spoken
-form ("Qumran cave four, two hundred forty-six") is computed by parsing the
-match, not looked up — see ``base.py``'s ``QUMRAN_PATTERN``/``speak_qumran``,
+form ("four Q, two-four-six" — digit-by-digit, call-sign style, not a
+cardinal number) is computed by parsing the match, not looked up — see
+``base.py``'s ``QUMRAN_PATTERN``/``speak_qumran``,
 alongside ``STEPHANUS_LOCATOR``/``stephanus_locator`` and
 ``DIELS_KRANZ_LOCATOR``/``diels_kranz_locator`` for the same reason those
 live in the engine module rather than here: this file, like ``stephanus.py``
