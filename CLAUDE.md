@@ -74,7 +74,14 @@ weave them into the text as spoken digressions. TTS will start with
   grown real forcing cases — Fritz Graf's *Magic in the Ancient World* and Yates' *Art of
   Memory* and *Lull and Bruno* are genuine blobs (`pdf.py`'s three-signal test —
   `doc.get_toc()` empty, `_font_profile`'s `note_size` coming back `None`,
-  `_pairing_holds` failing — holds for all three). Michael Allen Williams' *Rethinking
+  `_pairing_holds` failing — holds for all three). Kingsley's 2002 journal article
+  "Empedocles for the New Millennium" is a near-miss on that same test — a real
+  `note_size` (7.8pt) and, after fixing `_NOTE_START` to accept a bare space as well as
+  a period, real note *text* (163 parsed, up from 2) — but the in-body superscript
+  digits carry the OCR's own character-substitution errors (`[` for `I`, `.` for `,`,
+  seen throughout its footnotes too) often enough that only 37% of notes ever find their
+  anchor, short of `_pairing_holds`'s 50% floor, so it still extracts with every
+  footnote discarded. Michael Allen Williams' *Rethinking
   Gnosticism* and the PDF duplicate of Couliano's *Eros and Magic* are a narrower case:
   a real text layer, no OCR needed, but no embedded outline at all (only two of the three
   signals) — exactly Marker's fit, since `disable_ocr` reuses that text layer rather than

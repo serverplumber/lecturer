@@ -49,7 +49,10 @@ _SOFT_HYPHEN = re.compile(r"­\s*")
 # C0 controls and DEL, except tab and newline: text layers hide artefacts
 # like backspace between a running head and its page number.
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
-_NOTE_START = re.compile(r"^(\d+)\.\s+(.*)", re.DOTALL)
+# The period is optional: some journals number notes "15 See below..."
+# rather than "15. See below...", with nothing but the space to mark where
+# the number ends and the note begins.
+_NOTE_START = re.compile(r"^(\d+)\.?\s+(.*)", re.DOTALL)
 _FURNITURE_MAX_CHARS = 80
 # A short block recurring as the first or last block of a page (running
 # head, running foot) is furniture even when a short chapter keeps its
