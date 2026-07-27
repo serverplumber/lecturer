@@ -20,12 +20,13 @@ from redaction.elocution.diels_kranz import DIELS_KRANZ_SIGLA, diels_kranz_syste
 from redaction.elocution.josephus import JOSEPHUS_SIGLA, josephus_system
 from redaction.elocution.philo import PHILO_SIGLA, philo_system
 from redaction.elocution.pseudepigrapha import PSEUDEPIGRAPHA_SIGLA, pseudepigrapha_system
-from redaction.elocution.qumran import qumran_system
+from redaction.elocution.qumran import CD_SIGLA, damascus_document_system, qumran_system
 from redaction.elocution.stephanus import STEPHANUS_SIGLA, stephanus_system
 
 __all__ = [
     "BARE_AUTHORS",
     "BIBLICAL_SIGLA",
+    "CD_SIGLA",
     "CLASSICAL_SIGLA",
     "DIELS_KRANZ_SIGLA",
     "JOSEPHUS_SIGLA",
@@ -39,6 +40,7 @@ __all__ = [
     "bare_authors_system",
     "biblical_system",
     "classical_system",
+    "damascus_document_system",
     "default_systems",
     "diels_kranz_system",
     "josephus_system",
@@ -56,10 +58,9 @@ def default_systems() -> tuple[System | PatternSystem, ...]:
     Order matters only for sigla identical across systems (see
     ``base.py``'s ``_merge``) — classical goes first so its "Num" (Numa)
     wins over biblical's "Num" (Numbers) in this corpus. Stephanus, Philo,
-    Josephus, Diels-Kranz, pseudepigrapha, Qumran, and the bare-author list
-    don't currently collide with the others or each other, so their
-    position is arbitrary. Grows as Bekker and Qumran's named/lettered form
-    land.
+    Josephus, Diels-Kranz, pseudepigrapha, Qumran, the Damascus Document,
+    and the bare-author list don't currently collide with the others or
+    each other, so their position is arbitrary. Grows as Bekker lands.
     """
     return (
         classical_system(),
@@ -69,6 +70,7 @@ def default_systems() -> tuple[System | PatternSystem, ...]:
         diels_kranz_system(),
         pseudepigrapha_system(),
         qumran_system(),
+        damascus_document_system(),
         biblical_system(),
         bare_authors_system(),
     )

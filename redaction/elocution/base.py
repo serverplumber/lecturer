@@ -185,12 +185,31 @@ class System:
     speak_locator: Callable[[str], str] = mechanical_locator
 
 
-_QUMRAN_RE = re.compile(r"(\d{1,2})Q(\d{1,4})")
-# A bare Qumran document number: cave, then "Q", then the document number —
-# no locator, since real citations in this corpus are almost always bare
-# ("4Q246"); see ``qumran.py`` for the fuller shape and what's deliberately
-# not covered yet.
-QUMRAN_PATTERN = r"\d{1,2}Q\d{1,4}"
+# Named Qumran documents, the same way biblical books are named rather than
+# read as numbers — SBL's own English (or, where SBL gives none, its own
+# Hebrew transliteration) title for each, verified against §8.3.5 rather
+# than guessed. Evidenced by real citations, not transcribed from SBL's
+# fuller list of named scrolls — see ``qumran.py``.
+QUMRAN_NAMES: dict[str, str] = {
+    "Ps": "the Psalms Scroll",
+    "MMT": "Miqsat Ma'ase ha-Torah",
+    "H": "the Thanksgiving Hymns",
+    "M": "the War Scroll",
+    "S": "the Rule of the Community",
+}
+_QUMRAN_NAME_ALT = "|".join(re.escape(n) for n in sorted(QUMRAN_NAMES, key=len, reverse=True))
+_QUMRAN_RE = re.compile(rf"(\d{{1,2}})Q({_QUMRAN_NAME_ALT}|\d{{1,4}})([a-z]?)(?: ({LOCATOR}))?")
+# A Qumran citation: cave, "Q", then either a named document (looked up in
+# QUMRAN_NAMES) or a bare document number, optionally a copy letter glued
+# on with no separator ("11QPsa", "4Q98d" — real DSS convention for "the
+# a-copy"/"the d-copy" of a multiply-attested work; no fixed ceiling on how
+# many copies a work might have, unlike Stephanus's fixed five, hence the
+# open ``[a-z]`` rather than a narrower range), optionally a trailing
+# space-separated colon locator ("1QH 11:19-22"). No siglum/locator split
+# the way a table-driven ``System`` has: the whole thing is one match,
+# since a bare document number ("4Q246") *is* the citation's identity, not
+# a pointer into it — see ``qumran.py``.
+QUMRAN_PATTERN = rf"\d{{1,2}}Q(?:{_QUMRAN_NAME_ALT}|\d{{1,4}})[a-z]?(?: {LOCATOR})?"
 
 
 def _spell_digits(digits: str) -> str:
@@ -199,21 +218,33 @@ def _spell_digits(digits: str) -> str:
 
 
 def speak_qumran(citation: str) -> str:
-    """Speak a bare Qumran citation: "4Q246" -> "four Q, two-four-six".
+    """Speak a Qumran citation: named, numbered, lettered, and/or located.
 
-    Digit-by-digit, call-sign style, not a cardinal number — the same
-    reason a flight number or a tail number is read "two-four-six" and not
-    "two hundred forty-six": it's dictation, meant to be taken down digit
-    by digit, not parsed as a quantity. Also sidesteps "eleven" versus "one
+    "4Q246" -> "four Q, two-four-six" — digit-by-digit, call-sign style,
+    not a cardinal number, the same reason a flight number is read
+    "two-four-six" and not "two hundred forty-six": it's dictation, meant
+    to be taken down digit by digit. Also sidesteps "eleven" versus "one
     one" for a two-digit cave number, the ambiguity call signs read
     digit-by-digit to avoid in the first place. The "Q" already signals
     Qumran in context the same way the written siglum does, so it isn't
-    narrated as "cave" either — see ``mechanical_locator``'s own docstring
-    for why a label isn't added unless a sample proves the bare numbers
-    ambiguous.
+    narrated as "cave" — see ``mechanical_locator``'s own docstring for why
+    a label isn't added unless a sample proves the bare numbers ambiguous.
+
+    "11QPsa" -> "eleven Q, the Psalms Scroll A" — a named document is
+    looked up rather than spelled, the same as any other siglum table
+    here; a copy letter, when present, is capitalised so a TTS reads it as
+    a letter name, same as Stephanus's page-letter. "1QH 11:19-22" ->
+    "...the Thanksgiving Hymns, eleven, nineteen to twenty-two" — a
+    trailing locator is spoken with the shared mechanical scheme.
     """
-    cave, document = _QUMRAN_RE.match(citation).groups()
-    return f"{_spell_digits(cave)} Q, {_spell_digits(document)}"
+    cave, body, letter, locator = _QUMRAN_RE.match(citation).groups()
+    spoken = QUMRAN_NAMES[body] if body in QUMRAN_NAMES else _spell_digits(body)
+    result = f"{_spell_digits(cave)} Q, {spoken}"
+    if letter:
+        result += f" {letter.upper()}"
+    if locator:
+        result += f", {mechanical_locator(locator)}"
+    return result
 
 
 @dataclass
