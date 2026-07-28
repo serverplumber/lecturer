@@ -303,6 +303,91 @@ class _PatternEntry:
     system: PatternSystem
 
 
+@dataclass
+class NearMiss:
+    """A citation-shaped span Elocutor found but didn't convert.
+
+    Not a diagnosis: a known siglum sits here, next to something
+    locator-ish that the strict grammar above didn't accept — a missing
+    space, OCR noise, or a locator shape this system doesn't cover all
+    look identical from here. What's actually wrong is left for a human to
+    read off ``context``, the same abstain-over-guess posture as the rest
+    of elocution — reporting "here" beats guessing "why."
+    """
+
+    system: str
+    siglum: str
+    section: str
+    location: str
+    context: str
+
+
+# A siglum's real match requires a literal space (or nothing) before its
+# locator (see ``_merge``); a near-miss only needs a digit *close by* —
+# immediately glued on ("DK47A1", no separator at all, so the real pattern
+# never even tries) or a couple of separator characters away ("DK 21 Bag",
+# where the digits are fine but what follows them isn't). Kept short and
+# strict on purpose: a wide window would flag ordinary prose ("Mark, ever
+# the pragmatist, counted 12 examples") as a near-miss just because a
+# digit shows up somewhere downstream.
+_NEAR_MISS_GAP = re.compile(r"^[,.\s]{0,2}\d")
+_NEAR_MISS_CONTEXT = 30
+
+
+def _near_misses(
+    text: str,
+    entries: Sequence[_Entry | _PatternEntry],
+    covered: Sequence[tuple[int, int]],
+    *,
+    section: str,
+    location: str,
+) -> list[NearMiss]:
+    """Scan for a known siglum sitting next to something locator-ish.
+
+    Run over the *pre-substitution* text (the caller already has it, before
+    ``Elocutor._pattern.sub`` rewrites anything) rather than the spoken
+    output — offsets and content both shift once real matches are
+    replaced, and a rewritten citation could spuriously re-trigger the same
+    scan. ``covered`` is the real merged pattern's own match spans over
+    that same text; anything inside one is a real conversion, not a near
+    miss. ``PatternSystem`` entries (Qumran) have no fixed siglum to scan
+    for, so they're skipped — a generative shape needs its own near-miss
+    notion, not this one.
+    """
+    misses = []
+    seen: set[tuple[int, int]] = set()
+    for entry in entries:
+        if isinstance(entry, _PatternEntry):
+            continue
+        # A real match requires a boundary *or* nothing at all before the
+        # locator; a near-miss only needs the siglum not to be a prefix of
+        # a longer ordinary word ("Number" must not match "Num"). Requiring
+        # either an immediate digit or a normal word boundary right after
+        # the siglum draws exactly that line.
+        pattern = re.compile(rf"\b{re.escape(entry.siglum)}(?:(?=\d)|\b)")
+        for m in pattern.finditer(text):
+            span = m.span()
+            if span in seen or any(a < span[1] and span[0] < b for a, b in covered):
+                continue
+            tail = text[span[1] : span[1] + 8]
+            if not _NEAR_MISS_GAP.match(tail):
+                continue
+            seen.add(span)
+            start = max(0, span[0] - _NEAR_MISS_CONTEXT)
+            end = min(len(text), span[1] + _NEAR_MISS_CONTEXT)
+            context = " ".join(text[start:end].split())
+            misses.append(
+                NearMiss(
+                    system=entry.system.name,
+                    siglum=entry.siglum,
+                    section=section,
+                    location=location,
+                    context=context,
+                )
+            )
+    return misses
+
+
 def _merge(
     systems: Sequence[System | PatternSystem],
 ) -> tuple[re.Pattern[str], list[_Entry | _PatternEntry]]:
@@ -398,24 +483,39 @@ class Elocutor:
     def __init__(self, systems: Sequence[System | PatternSystem]) -> None:
         self.systems = systems
         self._pattern, self._entries = _merge(systems)
+        self.near_misses: list[NearMiss] = []
 
     def redact(self, script: Script) -> Script:
-        return Script(
-            sections=[
-                ScriptSection(
-                    title=section.title,
-                    utterances=[
-                        Utterance(
-                            text=self._pattern.sub(self._replace, u.text),
-                            manner=u.manner,
-                            lang=u.lang,
-                        )
-                        for u in section.utterances
-                    ],
-                    footnotes=section.footnotes,
+        self.near_misses = []
+        sections = []
+        for section in script.sections:
+            utterances = []
+            for index, u in enumerate(section.utterances, start=1):
+                self._scan(u.text, section.title, f"paragraph {index}")
+                utterances.append(
+                    Utterance(
+                        text=self._pattern.sub(self._replace, u.text),
+                        manner=u.manner,
+                        lang=u.lang,
+                    )
                 )
-                for section in script.sections
-            ]
+            # A weaver leaves notes here only when it didn't fold them into
+            # the utterances above (``NoteDropper``'s ``book`` variant) —
+            # those citations never reach the text scanned above, so they'd
+            # otherwise go unreviewed entirely.
+            for note in section.footnotes:
+                self._scan(note.text, section.title, f"footnote {note.ref}")
+            sections.append(
+                ScriptSection(
+                    title=section.title, utterances=utterances, footnotes=section.footnotes
+                )
+            )
+        return Script(sections=sections)
+
+    def _scan(self, text: str, section: str, location: str) -> None:
+        covered = [m.span() for m in self._pattern.finditer(text)]
+        self.near_misses.extend(
+            _near_misses(text, self._entries, covered, section=section, location=location)
         )
 
     def _replace(self, match: re.Match[str]) -> str:

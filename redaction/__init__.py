@@ -3,7 +3,14 @@
 from extraction import Extraction
 from redaction.base import Manner, Redactor, Script, ScriptSection, Utterance
 from redaction.cantillation import Cantillator
-from redaction.elocution import BARE_AUTHORS, Elocutor, System, bare_author_system, default_systems
+from redaction.elocution import (
+    BARE_AUTHORS,
+    Elocutor,
+    NearMiss,
+    System,
+    bare_author_system,
+    default_systems,
+)
 from redaction.elocution.bibliography import parse_bibliography, sniff_style
 from redaction.elocution.citation_pairing import pair_sigla
 from redaction.gloss import Glossator, ensure_synopsis
@@ -22,6 +29,7 @@ __all__ = [
     "FootnoteWeaver",
     "Glossator",
     "Manner",
+    "NearMiss",
     "NoteDropper",
     "ProviderError",
     "Redactor",
@@ -41,7 +49,7 @@ def redact(
     weaver: Redactor | None = None,
     interpreter: Redactor | None = None,
     systems: tuple[System, ...] | None = None,
-) -> Script:
+) -> tuple[Script, list[NearMiss]]:
     """Apply every redactional layer, in order, to the extracted text.
 
     ``weaver`` replaces the default ``NoteDropper`` — pass a ``Glossator``
@@ -57,14 +65,17 @@ def redact(
     ``systems`` explicitly is still the only way to bypass both.
     ``interpreter`` (a ``TongueInterpreter``) tags Latin-alphabet language
     switches after the deterministic tagger has handled the writing
-    systems.
+    systems. Alongside the script, returns the citation ``Elocutor``'s own
+    near-misses — citation-shaped spans it found but couldn't convert —
+    for the caller to write out for a human to check by eye.
     """
     if systems is None:
         systems = (*default_systems(), *_bare_author_systems(extraction))
+    elocutor = Elocutor(systems)
     layers: list[Redactor] = [
         SeamMender(),
         weaver or NoteDropper(),
-        Elocutor(systems),
+        elocutor,
         LanguageTagger(),
         *([interpreter] if interpreter is not None else []),
         Cantillator(),
@@ -72,7 +83,7 @@ def redact(
     script = Script.from_extraction(extraction)
     for layer in layers:
         script = layer.redact(script)
-    return script
+    return script, elocutor.near_misses
 
 
 def _bare_author_systems(extraction: Extraction) -> tuple[System, ...]:

@@ -27,6 +27,7 @@ text patterns.
 
 import itertools
 import re
+import warnings
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -94,6 +95,13 @@ class PdfExtractor:
         # collapses (OCR font jitter, no real anchors) and the "notes" are
         # torn-out running text — re-extract with footnote mode off.
         if notes and not _pairing_holds(page_texts, notes):
+            warnings.warn(
+                f"{document.name}: footnote anchors don't pair with the parsed notes "
+                f"(scanned/OCR mismatch?) — discarding all {len(notes)} notes and "
+                "falling back to text-only; check the source by eye if it should "
+                "have footnotes",
+                stacklevel=2,
+            )
             page_texts, notes = _assemble(pages, body_size, None, furniture)
         sections = _split_sections(pages, page_texts, notes, outline, body_size, furniture)
         return Extraction(sections=sections)

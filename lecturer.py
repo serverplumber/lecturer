@@ -27,6 +27,7 @@ from redaction import (
     FootnoteWeaver,
     Glossator,
     Manner,
+    NearMiss,
     ProviderError,
     Script,
     ScriptSection,
@@ -187,6 +188,40 @@ def write_redactions(script: Script, directory: Path, variant: str) -> Path:
             notes = "\n".join(f"[^{note.ref}]: {note.text}" for note in section.footnotes)
             (redactions_dir / f"{stem}.unwoven.txt").write_text(notes + "\n")
     return redactions_dir
+
+
+def write_review(near_misses: list[NearMiss], directory: Path, variant: str) -> Path | None:
+    """Write ``redactions/<variant>/review.md``: citations Elocutor couldn't convert.
+
+    Not a diagnosis — each entry is a known siglum sitting next to
+    something locator-shaped the grammar didn't accept, with enough
+    surrounding text for a human to see why and fix it by hand (in the
+    source text, or by extending the matching system in
+    ``redaction/elocution/``). Named ``.md``, not ``.txt``, so
+    ``read_redactions``'s glob never mistakes it for a section. Always
+    overwritten, even to "nothing to review" — never deleted, so a run
+    invoked with a narrower ``systems`` set (or one that errors early)
+    can't make an existing review vanish out from under someone reading it.
+    """
+    review_path = directory / "redactions" / variant / "review.md"
+    if not near_misses:
+        review_path.write_text(
+            f"# Citation review — {variant}\n\n"
+            "Nothing to review — every citation-shaped span converted.\n"
+        )
+        return None
+    lines = [
+        f"# Citation review — {variant}\n",
+        f"{len(near_misses)} citation-shaped span(s) Elocutor didn't convert. Not a "
+        "diagnosis: a known siglum sits next to something locator-ish (a missing "
+        "space, OCR noise, a shape the system doesn't cover...) that the grammar "
+        "didn't accept. Check the context below and fix by hand if it's worth it.\n",
+    ]
+    for miss in near_misses:
+        lines.append(f'- **{miss.section}**, {miss.location} — `[{miss.system}]` "{miss.siglum}"')
+        lines.append(f"  > {miss.context}")
+    review_path.write_text("\n".join(lines) + "\n")
+    return review_path
 
 
 def read_redactions(directory: Path, variant: str) -> Script | None:
@@ -614,12 +649,15 @@ def _redact_phase(app, directory: Path, extraction: Extraction, *, weaver, inter
     else:
         variant = "book"
     try:
-        script = redact(extraction, weaver=weaver, interpreter=interpreter)
+        script, near_misses = redact(extraction, weaver=weaver, interpreter=interpreter)
     except ProviderError as error:
         app.log.error(f"redaction failed: {error} (finished paragraphs are cached)")
         app.exit_code = 1
         raise SystemExit(app.exit_code) from error
     redactions_dir = write_redactions(script, directory, variant)
+    review_path = write_review(near_misses, directory, variant)
+    if review_path is not None:
+        app.log.warning(f"{len(near_misses)} unconverted citation(s) — see {review_path}")
     notes = sum(len(section.footnotes) for section in extraction.sections)
     unwoven = sum(len(section.footnotes) for section in script.sections)
     spoken_notes = (

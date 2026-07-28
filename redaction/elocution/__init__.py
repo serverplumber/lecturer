@@ -9,6 +9,7 @@ systems); the engine that ties them together lives in ``base.py``.
 from redaction.elocution.bare_authors import BARE_AUTHORS, bare_authors_system
 from redaction.elocution.base import (
     Elocutor,
+    NearMiss,
     PatternSystem,
     System,
     bare_author_system,
@@ -34,6 +35,7 @@ __all__ = [
     "PSEUDEPIGRAPHA_SIGLA",
     "STEPHANUS_SIGLA",
     "Elocutor",
+    "NearMiss",
     "PatternSystem",
     "System",
     "bare_author_system",

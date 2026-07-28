@@ -176,11 +176,7 @@ weave them into the text as spoken digressions. TTS will start with
   division; still open, and only one occurrence in this corpus so far, not yet worth
   building for. Unlike Stephanus's own letter, which is capitalised so a TTS reads it as a
   letter name rather than the indefinite article, a bare letter needs no such
-  transliteration — Kokoro already pronounces it correctly as-is) and a multi-locator
-  citation reusing the author bare
-  ("Cassius Dio, 40.47, 23.26.1" only converts the first pair) — the same bare-reuse gap
-  `citation_pairing.py` already measured, belonging to component 14's stateful register,
-  not this system. The other edge case — `LOCATOR` capped at three dot/colon-separated
+  transliteration — Kokoro already pronounces it correctly as-is). The other edge case — `LOCATOR` capped at three dot/colon-separated
   numbers, stranding a fourth ("Livy, 13.16.8.1" converted "13.16.8" and left ".1") — is
   fixed: uncapped to one-or-more repetitions on both the main chain and the range side,
   since nothing about the grammar depends on a fixed depth and real citations in this
@@ -290,6 +286,43 @@ weave them into the text as spoken digressions. TTS will start with
     still-pending draft sweep, which is meant to take a pairing like this and turn its
     siglum into a spoken expansion ("AJ" → "Jewish Antiquities") — a narrower, lower-risk
     LLM ask than guessing authorship, since the author side is already settled here.
+  - **Citation review** — every abstain-over-guess layer above still needs a way to tell a
+    human "look here," not just silently leave text unconverted. `Elocutor` now scans its
+    own input (both utterance text and, for the `book` variant, notes `NoteDropper` left on
+    `section.footnotes` rather than folding into utterances — the only weaver that leaves
+    citations Elocutor's substitution pass never touches) for a known siglum sitting next to
+    something locator-ish — a digit immediately glued on, or a couple of separator
+    characters away — that the strict merged pattern didn't accept. Not a diagnosis: it
+    reports *where*, with enough surrounding context to read *why* off the text, not a
+    guess at which of several possible causes (missing space, OCR noise, an uncovered
+    locator shape, a genuine siglum collision) applies — the same posture as every abstain
+    above. `PatternSystem` (Qumran) is skipped: a generative shape has no fixed siglum to
+    scan for in the first place. `lecturer.py`'s `write_review` writes the result to
+    `redactions/<variant>/review.md` — `.md`, not `.txt`, so `read_redactions`'s glob never
+    mistakes it for a section — overwritten every run, even to "nothing to review," rather
+    than deleted, so a run with a narrower `systems` set can't make an existing review
+    vanish out from under someone reading it. Verified against two real corpora: Kingsley's
+    *Ancient Philosophy, Mystery, and Magic* (a blob PDF, so its Diels-Kranz citations sit in
+    running body text rather than footnotes) surfaced 27 spans in a report short enough to
+    read end to end, including the 3 already known from `diels_kranz.py`'s own TODO
+    ("DK47A1" with no space, "DK 21 Bag" and "DK 87 B6o" from OCR digit/letter confusion) —
+    plus a genuinely new pattern, "DK 1. 289.17" and the like: Diels' own volume/page
+    citation shape, distinct from the chapter/letter/item fragment grammar `diels_kranz.py`
+    implements, evidenced but not yet worth building a system for on one corpus alone.
+    `temple_gates` surfaced 21 spans, all one shape: Justin's/Apuleius's/Tertullian's
+    "Apol." and Philo's/Cicero's "Leg." in chapter.section form, losing to Stephanus's
+    identically-spelled "Apol."/"Leg." (Plato's *Apology*/*Laws*, page+letter form) under
+    `_merge`'s priority tie-break — confirming component 9 `patristic_sigla`'s gap
+    (`docs/elocution.md`) is a real, evidenced collision in this corpus, not just the
+    hypothetical the shape-disambiguation design doc-comment above uses as its example.
+    Checked for the live-mispronunciation risk this implies (a `Leg.`/`Apol.` locator that
+    *does* happen to fit Stephanus's page+letter shape would be silently spoken as Plato,
+    invisible to a review that only reports what the pattern rejected): none found in
+    `temple_gates`'s redacted output. Separately, `extraction/pdf.py`'s `_pairing_holds`
+    bail — silently discarding every parsed footnote on an OCR/anchor mismatch — now
+    `warnings.warn`s instead of failing silent, the one bail site destructive enough
+    (whole-document footnote loss) to warrant a warning ahead of citation review's own
+    per-document report.
 - `recitation/` — speaks the script (`--speak`): `Reciter` strategy protocol, one WAV per
   section into the work dir's `audio/`. `KokoroReciter` runs Kokoro-82M via kokoro-onnx
   (pure wheels, CPU ~4× realtime; model fetched once into `~/.cache/lecturer`). Text is
