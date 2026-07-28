@@ -370,8 +370,19 @@ def _merge(
         # paragraphs with blank lines, and ``\s+`` would let a siglum-shaped
         # word ending one paragraph match across the break into a
         # locator-shaped number starting the next.
+        #
+        # ``cont{i}`` picks up further locators reusing this same siglum,
+        # comma- or semicolon-separated with no siglum repeated ("T. Levi
+        # 10:5; 14:1; 16:1", "Cassius Dio, 40.47, 23.26.1") — real,
+        # evidenced citation shapes a reader takes for granted the way a
+        # sentence takes an elided subject for granted. Each continuation
+        # unit starts on a digit, the same as any locator, so this can't
+        # accidentally swallow a genuinely new citation: "T. Levi 18:10-14;
+        # Jub. 4:18" stops cleanly, since "Jub" isn't a digit.
         branches.append(
-            rf"(?P<sig{i}>{re.escape(entry.siglum)})[,.]? (?P<loc{i}>{entry.system.locator})"
+            rf"(?P<sig{i}>{re.escape(entry.siglum)})[,.]? "
+            rf"(?P<loc{i}>{entry.system.locator})"
+            rf"(?P<cont{i}>(?:[;,] {entry.system.locator})*)"
         )
     return re.compile(rf"\b(?:{'|'.join(branches)})\b"), entries
 
@@ -409,9 +420,23 @@ class Elocutor:
 
     def _replace(self, match: re.Match[str]) -> str:
         group = match.lastgroup
-        # "sig{i}"/"loc{i}"/"pat{i}" share a three-character prefix.
-        index = int(group[3:])
+        # "sig{i}"/"loc{i}"/"cont{i}"/"pat{i}" all end in the same index;
+        # trailing digits, not a fixed-length prefix, since ``cont{i}`` is
+        # always what ``lastgroup`` reports for a table-driven entry (a
+        # ``*``-repeated group "participates" and becomes the last-matched
+        # group even when it matches zero repetitions).
+        index = int(re.search(r"\d+$", group).group())
         entry = self._entries[index]
         if isinstance(entry, _PatternEntry):
             return entry.system.speak(match.group(group))
-        return f"{entry.spoken} {entry.system.speak_locator(match.group(group))}"
+        # ``loc{index}`` is the first locator, ``cont{index}`` any further
+        # ones reusing this same siglum ("T. Levi 10:5; 14:1; 16:1") — each
+        # spoken separately with the system's own ``speak_locator`` (it only
+        # ever parses one locator unit at a time) and rejoined, rather than
+        # widening every ``speak_locator`` to understand chains itself.
+        locator_text = match.group(f"loc{index}") + match.group(f"cont{index}")
+        spoken_locators = (
+            entry.system.speak_locator(unit)
+            for unit in re.findall(entry.system.locator, locator_text)
+        )
+        return f"{entry.spoken} {'; '.join(spoken_locators)}"
