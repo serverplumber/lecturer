@@ -6,6 +6,8 @@ One file per system (``biblical.py``, ``classical.py``, ``stephanus.py``,
 systems); the engine that ties them together lives in ``base.py``.
 """
 
+from pathlib import Path
+
 from redaction.elocution.bare_authors import BARE_AUTHORS, bare_authors_system
 from redaction.elocution.base import (
     Elocutor,
@@ -54,7 +56,9 @@ __all__ = [
 ]
 
 
-def default_systems() -> tuple[System | PatternSystem, ...]:
+def default_systems(
+    *, elocution_dir: Path | None = None, directory: Path | None = None
+) -> tuple[System | PatternSystem, ...]:
     """The systems that run without any flag: fully deterministic, free.
 
     Order matters only for sigla identical across systems (see
@@ -63,9 +67,13 @@ def default_systems() -> tuple[System | PatternSystem, ...]:
     Josephus, Diels-Kranz, pseudepigrapha, Qumran, the Damascus Document,
     and the bare-author list don't currently collide with the others or
     each other, so their position is arbitrary. Grows as Bekker lands.
+
+    ``elocution_dir``/``directory`` only affect classical, the one open
+    system so far — see ``canon.py``: left ``None``, it falls back to its
+    own hardcoded seed alone, same as before either tier existed.
     """
     return (
-        classical_system(),
+        classical_system(elocution_dir=elocution_dir, directory=directory),
         stephanus_system(),
         philo_system(),
         josephus_system(),

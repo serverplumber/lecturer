@@ -1,5 +1,7 @@
 """Rework the extracted text, layer by layer, into a script for the TTS to perform."""
 
+from pathlib import Path
+
 from extraction import Extraction
 from redaction.base import Manner, Redactor, Script, ScriptSection, Utterance
 from redaction.cantillation import Cantillator
@@ -49,6 +51,8 @@ def redact(
     weaver: Redactor | None = None,
     interpreter: Redactor | None = None,
     systems: tuple[System, ...] | None = None,
+    directory: Path | None = None,
+    elocution_dir: Path | None = None,
 ) -> tuple[Script, list[NearMiss]]:
     """Apply every redactional layer, in order, to the extracted text.
 
@@ -63,6 +67,11 @@ def redact(
     specific document's bibliography and footnotes independently confirm
     — rather than left as the fully static ``default_systems()``; passing
     ``systems`` explicitly is still the only way to bypass both.
+    ``directory``/``elocution_dir`` thread through to :func:`default_systems`
+    for classical's two external tiers (``canon.py``) — this document's own
+    ``directory / "classical.json"`` and the shared canon at
+    ``elocution_dir / "classical.toml"``; left ``None``, classical falls
+    back to its bare hardcoded seed.
     ``interpreter`` (a ``TongueInterpreter``) tags Latin-alphabet language
     switches after the deterministic tagger has handled the writing
     systems. Alongside the script, returns the citation ``Elocutor``'s own
@@ -70,7 +79,10 @@ def redact(
     for the caller to write out for a human to check by eye.
     """
     if systems is None:
-        systems = (*default_systems(), *_bare_author_systems(extraction))
+        systems = (
+            *default_systems(elocution_dir=elocution_dir, directory=directory),
+            *_bare_author_systems(extraction),
+        )
     elocutor = Elocutor(systems)
     layers: list[Redactor] = [
         SeamMender(),

@@ -526,6 +526,76 @@ class DraftLexicon(Controller):
             self.app.exit_code = 1
 
 
+class DraftClassical(Controller):
+    class Meta:
+        label = "draft-classical"
+        stacked_on = "base"
+        stacked_type = "nested"
+        help = "draft classical.json author-work sigla, then stop for review"
+        description = (
+            "Sweep this document's own bibliography and footnotes (via "
+            "citation_pairing.py's pair_sigla) for author-work abbreviations no "
+            "system already resolves, and ask a cheap model for each one's spoken "
+            "title — then stop: check the drafts by eye (redact picks them up "
+            "automatically from here on), and run promote-classical once you trust "
+            "one enough for every book. Existing entries are never overwritten."
+        )
+        arguments = [_OUTPUT_ARGUMENT, *_PROVIDER_ARGUMENTS]
+
+    def _default(self):
+        directory = _existing_workdir(self.app)
+        if directory is None:
+            return
+        extraction = _extract_phase(self.app, directory, None)
+        if extraction is None:
+            return
+        from redaction.elocution.draft import draft
+
+        try:
+            draft(
+                extraction,
+                _provider(self.app, TAGGING_MODELS),
+                _elocution_dir(self.app),
+                directory,
+                log=self.app.log.info,
+            )
+        except ProviderError as error:
+            self.app.log.error(f"classical draft failed: {error}")
+            self.app.exit_code = 1
+
+
+class PromoteClassical(Controller):
+    class Meta:
+        label = "promote-classical"
+        stacked_on = "base"
+        stacked_type = "nested"
+        help = "merge this document's classical.json into the shared classical.toml canon"
+        description = (
+            "Copy every entry in this work dir's classical.json (this document's "
+            "own author-work sigla) into the shared, hand-curated canon at "
+            "elocution_dir/classical.toml — used by every book from here on. "
+            "Additive only: a siglum the canon already has is left untouched. "
+            "Run it once you've checked a hand-added or drafted entry by ear."
+        )
+        arguments = [_OUTPUT_ARGUMENT]
+
+    def _default(self):
+        directory = _existing_workdir(self.app)
+        if directory is None:
+            return
+        from redaction.elocution.canon import promote
+
+        elocution_dir = _elocution_dir(self.app)
+        added = promote(elocution_dir, directory, "classical")
+        if added:
+            self.app.log.info(
+                f"promoted {len(added)} entr{'y' if len(added) == 1 else 'ies'} into "
+                f"{elocution_dir / 'classical.toml'}: {', '.join(sorted(added))}"
+            )
+        else:
+            self.app.log.info("nothing new to promote")
+
+
 def _existing_workdir(app) -> Path | None:
     """The work dir a phase verb operates on; errors if it isn't one yet."""
     if not app.pargs.output:
@@ -614,6 +684,25 @@ def _provider(app, defaults):
     )
 
 
+_DEFAULT_ELOCUTION_DIR = Path.home() / ".config" / "lecturer" / "elocution"
+
+
+def _elocution_dir(app) -> Path:
+    """Where the shared sigla canon (``redaction.elocution.canon``'s tier 1) lives.
+
+    Ordinary Cement config precedence: the ``[lecturer] elocution_dir``
+    setting in ``lecturer.conf`` (any of Cement's usual locations), or a
+    ``LECTURER_ELOCUTION_DIR`` environment variable, with a plain XDG-style
+    default so a real install needs no setup at all. ``main()`` layers a
+    repo-local, gitignored ``lecturer.conf`` on top of all of that when one
+    exists — see there for why: it lets a dev checkout and an installed copy
+    on the same machine each keep their own canon rather than silently
+    sharing one through ``~/.config/lecturer/lecturer.conf``.
+    """
+    value = app.config.get("lecturer", "elocution_dir", fallback=None)
+    return Path(value).expanduser() if value else _DEFAULT_ELOCUTION_DIR
+
+
 def _apparatus_skip(sections: str | None):
     from recitation import APPARATUS
 
@@ -649,7 +738,13 @@ def _redact_phase(app, directory: Path, extraction: Extraction, *, weaver, inter
     else:
         variant = "book"
     try:
-        script, near_misses = redact(extraction, weaver=weaver, interpreter=interpreter)
+        script, near_misses = redact(
+            extraction,
+            weaver=weaver,
+            interpreter=interpreter,
+            directory=directory,
+            elocution_dir=_elocution_dir(app),
+        )
     except ProviderError as error:
         app.log.error(f"redaction failed: {error} (finished paragraphs are cached)")
         app.exit_code = 1
@@ -734,12 +829,34 @@ class Lecturer(App):
     class Meta:
         label = "lecturer"
         base_controller = "base"
-        handlers = [Base, Extract, Redact, Recite, Publish, DraftLexicon]
+        handlers = [
+            Base,
+            Extract,
+            Redact,
+            Recite,
+            Publish,
+            DraftLexicon,
+            DraftClassical,
+            PromoteClassical,
+        ]
         exit_on_close = True
+
+
+# A repo-local, gitignored config file, checked for by main() below — lets a
+# dev checkout keep its own settings (an in-repo elocution_dir, say) without
+# writing to ~/.config/lecturer/lecturer.conf, which an installed copy on the
+# same machine would also read. Not registered in Lecturer.Meta.config_files:
+# Cement loads the user-level ~/.config file *after* anything named there
+# (core_user_config_files always comes last), so listing it that way would
+# have the installed location win instead of this one. Parsed explicitly
+# after Cement's own setup so it merges in with the final say instead.
+_DEV_CONFIG = Path(__file__).resolve().parent / "lecturer.conf"
 
 
 def main():
     with Lecturer() as app:
+        if _DEV_CONFIG.exists():
+            app.config.parse_file(str(_DEV_CONFIG))
         app.run()
 
 
