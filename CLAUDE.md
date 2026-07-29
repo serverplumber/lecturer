@@ -120,7 +120,13 @@ weave them into the text as spoken digressions. TTS will start with
   `--base-url` pointed at any OpenAI-compatible server (Ollama etc.; `--effort high` for
   gpt-oss). A faithfulness guard requires the returned body prose to reproduce the
   paragraph verbatim and in full; guarded or failed paragraphs fall back to the verbatim
-  weave.
+  weave. `AnthropicProvider` sends `thinking={"type": "adaptive"}` optimistically and, on
+  the specific `BadRequestError` a model without adaptive-thinking support raises (Haiku
+  4.5 among them — the default for every cheap-tier call: `draft-lexicon`,
+  `TongueInterpreter`, `draft-classical`), disables it and retries once, then stays off for
+  that provider instance — found for real running `draft-classical` against `temple_gates`;
+  a hardcoded model list was rejected in favour of this since it would only go stale as new
+  models ship.
 - **Citation dictation**, in `redaction/elocution/` — inline scholarly citations
   ("1 Cor 10:2–4", "Or. 32.9.6–10") are author's-own-prose, not apparatus, so they can't
   be dropped like bare footnotes; they need to be *spoken*, just not as written. Not
@@ -210,14 +216,56 @@ weave them into the text as spoken digressions. TTS will start with
     the two need to coexist under the same siglum without either being dropped once
     classical's table grows to include it.
   - `classical.py` — the heterogeneous Latin author-work abbreviations ("Or." → "Oration",
-    "Ann." → "Annals", ...). Open-vocabulary, so the real table wants a per-document
-    cheap-LLM draft sweep into a hand-editable map, additive and never-overwrite, reusing
-    the `--lexicon-draft` *pattern* rather than the `Lexicon` class — **not built yet**.
-    Currently holds one hand-verified seed entry, added for a real collision rather than
-    drafted: "Num" for Plutarch's *Numa*, listed before biblical in `default_systems()` so
-    it wins that tie. Expand minimally once the draft sweep lands — never resolve
-    author/work identity (exactly where a cheap model hallucinates; the surrounding prose
-    already supplies it).
+    "Ann." → "Annals", ...). Open-vocabulary, so past its one hand-verified seed ("Num" for
+    Plutarch's *Numa*, listed first in `default_systems()` so it wins the tie against
+    biblical's Numbers) the real table is grown externally, in `redaction/elocution/
+    canon.py`'s two tiers, rather than by further hand-editing this module: tier 1
+    (`elocution_dir/classical.toml` — this machine's shared canon, valid for every book) and
+    tier 2 (`<work dir>/classical.toml` — this one document's own entries). Both TOML, both
+    for the same reason: an entry can carry a real comment recording *why*, the same
+    provenance the closed tables keep inline, rather than splitting formats because tier 2
+    is also tooling-written — `promote-classical` (below) already proves `tomlkit` writes
+    TOML programmatically, comments and all, so there was never a principled reason to keep
+    tier 2 on JSON once it needed to carry that kind of provenance too. Precedence is seed <
+    tier 1 < tier 2; only `promote-classical` ever writes tier 1, additively, never touching
+    a siglum it already has. `elocution_dir` is ordinary Cement config (`[lecturer]
+    elocution_dir`, or `LECTURER_ELOCUTION_DIR`), defaulting to `~/.config/lecturer/
+    elocution` so a real install needs no setup — see `docs/contributing.md` for the
+    repo-local dev override that keeps a checkout's own canon from silently sharing state
+    with an installed copy on the same machine.
+  - `draft-classical`/`promote-classical` (`redaction/elocution/draft.py`, `canon.py`) —
+    `draft-classical` seeds tier 2 by reusing `citation_pairing.py`'s `pair_sigla`: computed
+    there already, but until now only its `siglum is None` (bare-author) rows were used, the
+    `siglum is not None` rows are candidates here, excluding any siglum a system already
+    resolves (covers Josephus/Philo's own dedicated tables for free, since their sigla are
+    already in the merged set) and any siglum `pair_sigla`'s own `collisions()` flags
+    ambiguous. The LLM's only job is expanding an already-confirmed author+siglum pair into
+    a spoken title ("AJ" → "Jewish Antiquities") — narrower and safer than guessing
+    authorship, exactly the boundary this file and `citation_pairing.py` were originally
+    written to describe before either was built. A siglum that stays unresolved — genuinely
+    ambiguous, or the model wasn't confident — isn't dropped: it's written into tier 2 as a
+    **stub**, no `spoken` key (so `canon.py`'s loader ignores it exactly as if it weren't
+    there) but a real TOML comment recording why, plus a `bibliography` hint pulled verbatim
+    from this document's own confirmed primary-source entries naming the candidate
+    author(s). A stub is the one thing a later, more confident run is allowed to overwrite
+    without a human editing it first; two stubs never replace each other, so a hint stays
+    stable rather than churning every run. `promote-classical` copies only `spoken` into
+    tier 1 — a stub's own `note`/`candidates`/`bibliography` are this document's scratch
+    context, not a fact about the siglum worth keeping once resolved. Verified end to end
+    against a real re-extraction of `temple_gates`: 27 real candidates, correctly withholding
+    "Ann." (Tacitus 13x vs. Suetonius 1x — the same collision `citation_pairing.py`'s own
+    bullet below already confirmed a genuine citation slip in the book, not a scanner bug);
+    two separate real model runs resolved 25 then 2 more (additive, nothing overwritten);
+    promoted into `classical.toml`, idempotent on a second promote; and
+    `default_systems(elocution_dir=...)` actually speaking a promoted entry through
+    `Elocutor` ("Suetonius, Ner. 49.2" → "Suetonius, Nero forty-nine, two"). Surfaced along
+    the way, fixed, unrelated to this feature specifically: `AnthropicProvider.ask` sent
+    `thinking={"type": "adaptive"}` unconditionally, and Haiku 4.5 — the default cheap tier
+    every draft sweep here uses (`draft-lexicon`, `TongueInterpreter`, `draft-classical`) —
+    rejects it outright; now an instance-level fallback (optimistic on the first call,
+    retries once without thinking on that specific error, stays off after) rather than a
+    model-name list that would only go stale. See `docs/classical-sigla.md` for the
+    walkthrough.
   - **Still to come**: Bekker numbering and Diels-Kranz are further closed, enumerable
     systems of the same shape as biblical/Stephanus once they show up outside footnotes.
     Units (SAE vs SI collisions) are parked until citation dictation's systems are mature
@@ -267,7 +315,7 @@ weave them into the text as spoken digressions. TTS will start with
     through a modern edition or translation. The apparatus signal alone still isn't enough,
     precisely because of the original counterexample (a modern "Introduction" essay published
     *inside* a Loeb-adjacent volume, correctly left secondary). This is the foundation
-    `classical.py`'s not-yet-built draft sweep is meant to read from — not yet wired to it.
+    `draft-classical`'s LLM sweep reads from, via `citation_pairing.py`'s `pair_sigla` below.
   - `citation_pairing.py` — a document's own author-siglum vocabulary, read off its
     footnotes rather than aligned from bibliography titles. `docs/elocution.md`'s
     `truncation_aligner` (component 6) assumed a bibliography entry's title text could be
@@ -282,10 +330,13 @@ weave them into the text as spoken digressions. TTS will start with
     than one author in this document rather than silently keeping whichever it saw last;
     verified against `temple_gates`, the one collision it caught ("Ann." — Tacitus and
     Suetonius) turned out to be a genuine citation slip in the book itself, not a scanner
-    bug. Pure functions only so far, no CLI wiring and no LLM: that's `classical.py`'s
-    still-pending draft sweep, which is meant to take a pairing like this and turn its
-    siglum into a spoken expansion ("AJ" → "Jewish Antiquities") — a narrower, lower-risk
-    LLM ask than guessing authorship, since the author side is already settled here.
+    bug — still left for a human, not resolved here or by `draft-classical` below, since
+    which of the two is right is exactly the judgement call `collisions()` exists to hand
+    off rather than guess. Wired up by `draft-classical` (above): every other pairing here
+    — one where `pair_sigla` paired exactly one author with a siglum — is a candidate for
+    turning that siglum into a spoken expansion ("AJ" → "Jewish Antiquities"), a narrower,
+    lower-risk LLM ask than guessing authorship, since the author side is already settled
+    here.
   - **Citation review** — every abstain-over-guess layer above still needs a way to tell a
     human "look here," not just silently leave text unconverted. `Elocutor` now scans its
     own input (both utterance text and, for the `book` variant, notes `NoteDropper` left on
@@ -366,6 +417,10 @@ weave them into the text as spoken digressions. TTS will start with
   audio signatures include per-section lexicon digests so editing an entry re-renders
   only the sections that use it.
 - `texts/` — source monographs (gitignored; copyrighted material).
+- `elocution/` (or wherever `elocution_dir` points) holds `redaction/elocution/canon.py`'s
+  tier 1 — `classical.toml` today, the shared sigla canon every book draws on. Not a work
+  dir (it outlives any one book), but self-ignoring the same way, and gitignored from a dev
+  checkout via `lecturer.conf` — see `docs/contributing.md`.
 - Working directories (e.g. `./eros_magic`) are created by the CLI wherever `-o` points
   (`-d` belongs to cement's `--debug`). Each contains a copy of the source document, a
   `working_text` symlink to it, a `sections/` directory of extracted text + footnotes
@@ -377,21 +432,27 @@ weave them into the text as spoken digressions. TTS will start with
   each WAV's JSON `.sig` sidecar names the reciter and hashes the section's utterances,
   so re-runs keep unchanged sections, re-synthesise stale ones, and `--publish` follows
   via mtime; the playlist records the reciter in a comment. Text outputs (`sections/`,
-  `redactions/`) hold whatever the last run produced. Each
-  work dir contains a self-ignoring `.gitignore`.
+  `redactions/`) hold whatever the last run produced. A work dir may also carry
+  `lexicon.json` (pronunciation) and `classical.toml` (this document's own tier-2 sigla,
+  `redaction/elocution/canon.py`) — both hand-editable, both grown by a `draft-*` verb
+  rather than regenerated wholesale. Each work dir contains a self-ignoring `.gitignore`.
 
 ## Commands
 
 Everything routine is in the `justfile`:
 
-- `just setup` — `uv sync` + install pre-commit hooks (once after cloning).
+- `just setup` — `uv sync` + install pre-commit hooks + provision `lecturer.conf` from
+  `lecturer.conf.example` (once after cloning; never overwrites an existing
+  `lecturer.conf`). See `docs/contributing.md`.
 - `just lint` / `just fmt` / `just check` — ruff, same as the commit hooks run.
 - `just run -o <dir>` — the whole chain to publish, default settings. The phases are
   verbs — `extract` (takes the document; a different one prompts before rebuilding from
   the top), `redact` (weaving + LLM flags), `recite` (`--variant/--voice/--speed/
-  --sections`), `publish`, and `draft-lexicon` (drafts pronunciation entries, then stops
-  for review). Verbs resolve their own dependencies: free phases run on demand, glossing
-  never runs implicitly.
+  --sections`), `publish`, `draft-lexicon` (drafts pronunciation entries, then stops for
+  review), and `draft-classical`/`promote-classical` (draft this document's own
+  `classical.toml` sigla, then graduate one into the shared canon — see
+  `docs/classical-sigla.md`). Verbs resolve their own dependencies: free phases run on
+  demand, glossing never runs implicitly.
 
 Use `uv` for all dependency management (`uv add`, `uv add --dev`), never pip. direnv
 activates the venv; `.envrc` runs `uv sync` on entry.
