@@ -66,6 +66,12 @@ class AnthropicProvider:
         self._model = model
         self._effort = effort
         self._client = anthropic.Anthropic(**({"base_url": base_url} if base_url else {}))
+        # Optimistic until proven otherwise: adaptive thinking isn't available
+        # on every model (Haiku 4.5 rejects it outright with a 400), and which
+        # models support it isn't something to hardcode a list for — it's
+        # cheaper and more robust to just find out from the API once per
+        # instance and stop asking, than to guess from a model name.
+        self._thinking = True
 
     def ask(
         self, system: str, request: str, schema: type[Schema], context: str | None = None
@@ -78,11 +84,12 @@ class AnthropicProvider:
                 {"type": "text", "text": system},
                 {"type": "text", "text": context, "cache_control": {"type": "ephemeral"}},
             ]
+        if self._thinking:
+            extra["thinking"] = {"type": "adaptive"}
         try:
             response = self._client.messages.parse(
                 model=self._model,
                 max_tokens=8000,
-                thinking={"type": "adaptive"},
                 system=prompt,
                 messages=[{"role": "user", "content": request}],
                 output_format=schema,
@@ -95,6 +102,11 @@ class AnthropicProvider:
             raise ProviderError(
                 "no Anthropic credentials: set ANTHROPIC_API_KEY or run `ant auth login`"
             ) from error
+        except anthropic.BadRequestError as error:
+            if self._thinking and "adaptive thinking is not supported" in str(error):
+                self._thinking = False
+                return self.ask(system, request, schema, context)
+            raise ProviderError(str(error)) from error
         except anthropic.APIError as error:
             raise ProviderError(str(error)) from error
         self.input_tokens += response.usage.input_tokens
