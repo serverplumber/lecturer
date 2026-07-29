@@ -531,7 +531,7 @@ class DraftClassical(Controller):
         label = "draft-classical"
         stacked_on = "base"
         stacked_type = "nested"
-        help = "draft classical.json author-work sigla, then stop for review"
+        help = "draft classical.toml (tier 2) author-work sigla, then stop for review"
         description = (
             "Sweep this document's own bibliography and footnotes (via "
             "citation_pairing.py's pair_sigla) for author-work abbreviations no "
@@ -569,9 +569,9 @@ class PromoteClassical(Controller):
         label = "promote-classical"
         stacked_on = "base"
         stacked_type = "nested"
-        help = "merge this document's classical.json into the shared classical.toml canon"
+        help = "merge this document's classical.toml (tier 2) into the shared canon"
         description = (
-            "Copy every entry in this work dir's classical.json (this document's "
+            "Copy every entry in this work dir's classical.toml (this document's "
             "own author-work sigla) into the shared, hand-curated canon at "
             "elocution_dir/classical.toml — used by every book from here on. "
             "Additive only: a siglum the canon already has is left untouched. "

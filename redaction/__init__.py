@@ -69,7 +69,7 @@ def redact(
     ``systems`` explicitly is still the only way to bypass both.
     ``directory``/``elocution_dir`` thread through to :func:`default_systems`
     for classical's two external tiers (``canon.py``) — this document's own
-    ``directory / "classical.json"`` and the shared canon at
+    ``directory / "classical.toml"`` and the shared canon at
     ``elocution_dir / "classical.toml"``; left ``None``, classical falls
     back to its bare hardcoded seed.
     ``interpreter`` (a ``TongueInterpreter``) tags Latin-alphabet language
