@@ -6,6 +6,7 @@ default:
 setup:
     uv sync
     uv run pre-commit install
+    test -f lecturer.conf || cp lecturer.conf.example lecturer.conf
 
 # Lint (and auto-fix what ruff can)
 lint:

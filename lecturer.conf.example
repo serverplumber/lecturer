@@ -1,0 +1,7 @@
+[lecturer]
+# Where the shared, hand-curated sigla canon lives (redaction/elocution/canon.py's
+# tier 1). Copied to lecturer.conf (gitignored, personal to this checkout) by
+# `just setup` -- edit that copy, not this one. Keeping it in-repo means this dev
+# checkout never shares state with a separately installed copy of lecturer on the
+# same machine, which defaults to ~/.config/lecturer/elocution instead.
+elocution_dir = ./elocution
