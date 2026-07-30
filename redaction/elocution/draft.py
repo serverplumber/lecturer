@@ -1,4 +1,4 @@
-"""``draft-classical``: an LLM sweep that seeds classical.toml (tier 2).
+"""``draft-classical``: an LLM sweep that seeds classical_sigla.toml (tier 2).
 
 ``citation_pairing.py``'s ``pair_sigla`` already tells us, structurally,
 which (author, siglum) pairs a document's own footnotes use — no guessing,
@@ -17,13 +17,13 @@ covers Josephus/Philo's own dedicated tables without needing to special-case
 them) and isn't flagged ambiguous by ``pair_sigla``'s own ``collisions()`` —
 a siglum this document pairs with more than one author needs a human's eyes,
 not a guess. Resolved entries land in tier 2 only (``canon.py``'s
-``add_tier2``) — this document's ``classical.toml`` — never tier 1: an LLM's
+``add_tier2``) — this document's ``classical_sigla.toml`` — never tier 1: an LLM's
 guess isn't evidence until a human runs ``promote-classical`` to say so, the
 same posture ``add_tier2``/``promote`` already hold.
 
 A siglum that stays unresolved — genuinely ambiguous, or one the model
 wasn't confident about — isn't just logged and forgotten: it's written into
-``classical.toml`` as a stub (``canon.py``'s module docstring), with a
+``classical_sigla.toml`` as a stub (``canon.py``'s module docstring), with a
 bibliography hint pulled from the document's own confirmed primary-source
 entries where one names the author, so a human finds a head start sitting
 right where they'd add the entry by hand.
@@ -38,7 +38,7 @@ from extraction import Extraction
 from redaction.elocution import default_systems
 from redaction.elocution.base import System
 from redaction.elocution.bibliography import BibliographyEntry, parse_bibliography, sniff_style
-from redaction.elocution.canon import add_tier2
+from redaction.elocution.canon import add_tier2, tier2_path
 from redaction.elocution.citation_pairing import SiglumPairing, collisions, pair_sigla
 from redaction.providers import Provider
 
@@ -155,7 +155,7 @@ def draft(
         and pairing.siglum not in known
         and pairing.siglum not in ambiguous
     ]
-    path = directory / "classical.toml"
+    path = tier2_path(directory, "classical")
     resolved = 0
     if not found:
         log("classical draft: nothing new to ask the model")

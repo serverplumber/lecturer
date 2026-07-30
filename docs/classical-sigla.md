@@ -8,11 +8,11 @@ into two files instead of one hardcoded dict; this is how to actually work with 
 
 ## The two files
 
-- **Tier 1** — `elocution_dir/classical.toml`. This machine's canon, shared across every book.
+- **Tier 1** — `elocution_dir/classical_sigla.toml`. This machine's canon, shared across every book.
   `elocution_dir` defaults to `~/.config/lecturer/elocution`; a dev checkout usually points it
   in-repo instead (`docs/contributing.md`). Hand-edit this directly for anything you're
   confident is a universal fact, or let `promote-classical` write to it.
-- **Tier 2** — `<work dir>/classical.toml`. One document's own entries — hand-edited, or
+- **Tier 2** — `<work dir>/classical_sigla.toml`. One document's own entries — hand-edited, or
   drafted by `draft-classical`. Never touches tier 1.
 
 A citation resolves through seed (the one hardcoded entry in `classical.py`) → tier 1 → tier 2,
@@ -25,8 +25,12 @@ lecturer draft-classical -o temple_gates
 ```
 
 This reads the document's own bibliography and footnotes (`citation_pairing.py`'s
-`pair_sigla` — already-confirmed author, unknown siglum) and asks a cheap model to expand each
-one. A real run against `temple_gates` resolved candidates like:
+`pair_sigla` — already-confirmed author, unknown siglum) and asks a model (`DEFAULT_MODELS`,
+not the cheap tagging tier — classical-title expansion needs real classical knowledge a small
+model doesn't reliably have; a first pass with Haiku produced "Philopsides" for Lucian's *The
+Lover of Lies* and reused that same wrong title for an unrelated work, both caught only by
+knowing the real titles) to expand each candidate. A real run against `temple_gates` resolved
+candidates like:
 
 ```toml
 "AJ" = {spoken = "Jewish Antiquities", count = 20}
@@ -34,7 +38,8 @@ one. A real run against `temple_gates` resolved candidates like:
 ```
 
 `count` is bookkeeping (how often the siglum was cited), not read by anything downstream — safe
-to ignore or delete.
+to ignore or delete. Check drafts by eye regardless of model — this is exactly the kind of
+thing worth a `--model` override or a second pass if something looks off.
 
 Existing resolved entries are never touched, so `draft-classical` is safe to re-run any time —
 after adding a chapter, after a better model comes out, whatever. It'll only ever add what's
@@ -44,22 +49,36 @@ missing.
 
 Not every siglum resolves. Two things stop a draft: the siglum is ambiguous in this document
 (paired with more than one author), or the model wasn't confident. Either way, it lands as a
-**stub** — no `spoken` key, so it's inert (`Elocutor` never sees it) — with a comment and
-enough context to resolve by hand. A real one, from `temple_gates`:
+**stub** — no `spoken` key, so it's inert (`Elocutor` never sees it) — as a real `[siglum]`
+table (not a one-line inline table: TOML forbids a newline inside `{...}`, and a citation per
+author never fits one reasonable line anyway) with a comment and enough context to resolve by
+hand. A real one, from `temple_gates`:
 
 ```toml
 # ambiguous in this document — add "spoken" once you know which
-"Ann." = {candidates = {Suetonius = 1, Tacitus = 13}, bibliography = {Suetonius = ["Suetonius. Translated by J. C. Rolfe. 3 vols. LCL. 2nd edition. Cambridge: Harvard University Press, 1998."], Tacitus = ["Tacitus. The Histories and the Annals. Translated by Clifford H. Moore and John Jackson. 4 vols. LCL. Cambridge: Harvard University Press, 1937."]}}
+
+["Ann."]
+candidates = {Suetonius = 1, Tacitus = 13}
+
+["Ann.".bibliography]
+Suetonius = ["Suetonius. Translated by J. C. Rolfe. 3 vols. LCL. 2nd edition. Cambridge: Harvard University Press, 1998."]
+Tacitus = ["Tacitus. The Histories and the Annals. Translated by Clifford H. Moore and John Jackson. 4 vols. LCL. Cambridge: Harvard University Press, 1937."]
 ```
 
 `candidates` gives each author's citation count in this document; `bibliography` is that
-author's own bibliography entry, verbatim, so you don't have to go find it. Here the count
-(13 vs. 1) and the title itself both point at Tacitus's *Annals* — but don't take that as a
-rule, some books really do cite two authors under the same siglum on purpose. Resolve it by
-adding `spoken` to the same inline table:
+author's own bibliography entry, verbatim, so you don't have to go find it — omitted entirely
+when the document has no bibliography entry for that author at all (which is itself real
+information: see `Ep.`'s stub in the same file — Pliny and Augustine both cite it, neither has
+a bibliography entry here, which is exactly why `pair_sigla` couldn't confirm either one
+structurally and the ambiguity had to be added by hand instead). Here the count (13 vs. 1) and
+the title itself both point at Tacitus's *Annals* — but don't take that as a rule, some books
+really do cite two authors under the same siglum on purpose. Resolve it by adding `spoken`
+under the same header:
 
 ```toml
-"Ann." = {spoken = "Annals", candidates = {Suetonius = 1, Tacitus = 13}, bibliography = {...}}
+["Ann."]
+spoken = "Annals"
+candidates = {Suetonius = 1, Tacitus = 13}
 ```
 
 The rest of the table (`candidates`, `bibliography`) is inert once `spoken` is set — leave it

@@ -6,14 +6,14 @@ there, and fixing one means a normal commit. An open system's table (starting
 with classical.py) is never finished, so it gets two more layers on top of its
 own hardcoded seed, weakest to strongest:
 
-- **Tier 1**, ``<elocution_dir>/<system>.toml`` — this machine's shared,
+- **Tier 1**, ``<elocution_dir>/<system>_sigla.toml`` — this machine's shared,
   hand-curated canon, valid for every document. Only ``promote`` ever writes
   it, and does so with ``tomlkit`` so a human's own comments and formatting
   survive a programmatic edit. Never touched by a draft sweep directly — an
   LLM's guess isn't evidence until a human decides to promote it.
-- **Tier 2**, ``<work dir>/<system>.toml`` — this one document's own entries,
-  hand-edited or drafted (``draft-classical``, on the ``lexicon.py`` pattern:
-  additive, never overwriting a resolved entry).
+- **Tier 2**, ``<work dir>/<system>_sigla.toml`` — this one document's own
+  entries, hand-edited or drafted (``draft-classical``, on the ``lexicon.py``
+  pattern: additive, never overwriting a resolved entry).
 
 Both tiers are TOML, both for the same reason: an entry can carry a real
 comment recording *why* — the same provenance the closed tables keep inline
@@ -39,7 +39,14 @@ and, where the document's own bibliography names the author, a
 ``bibliography`` hint — the same abstain-over-guess posture as the near-miss
 review, applied to sigla resolution instead of citation matching: reported,
 not dropped, so a human finds it sitting right where they'd add the entry by
-hand, with a head start rather than a blank line.
+hand, with a head start rather than a blank line. A resolved entry is a
+short, flat inline table (fits one line: ``spoken``, maybe ``count``); a
+stub is a real ``[siglum]`` table instead — TOML forbids a newline inside
+``{...}`` (``tomllib`` rejects it outright), and a stub's own
+``bibliography`` — a whole citation per author — never fits one reasonable
+line regardless, so it gets its own ``[siglum.bibliography]`` sub-table, one
+author's citation per line, rather than one line straining to hold all of
+it.
 """
 
 import tomllib
@@ -48,12 +55,12 @@ from pathlib import Path
 import tomlkit
 
 
-def _tier1_path(elocution_dir: Path, system: str) -> Path:
-    return elocution_dir / f"{system}.toml"
+def tier1_path(elocution_dir: Path, system: str) -> Path:
+    return elocution_dir / f"{system}_sigla.toml"
 
 
-def _tier2_path(directory: Path, system: str) -> Path:
-    return directory / f"{system}.toml"
+def tier2_path(directory: Path, system: str) -> Path:
+    return directory / f"{system}_sigla.toml"
 
 
 def _resolved(entry) -> bool:
@@ -74,7 +81,7 @@ def load_tier1(elocution_dir: Path | None, system: str) -> dict[str, str]:
     """This machine's shared canon for ``system``, siglum -> spoken form."""
     if elocution_dir is None:
         return {}
-    path = _tier1_path(elocution_dir, system)
+    path = tier1_path(elocution_dir, system)
     if not path.exists():
         return {}
     return _entries(tomllib.loads(path.read_text()))
@@ -84,7 +91,7 @@ def load_tier2(directory: Path | None, system: str) -> dict[str, str]:
     """This document's own entries for ``system``, siglum -> spoken form."""
     if directory is None:
         return {}
-    path = _tier2_path(directory, system)
+    path = tier2_path(directory, system)
     if not path.exists():
         return {}
     return _entries(tomllib.loads(path.read_text()))
@@ -101,12 +108,36 @@ def merged_sigla(
     }
 
 
-def _as_inline_table(entry: dict) -> tomlkit.items.InlineTable:
-    """``entry``'s fields as an inline table — ``note`` excluded, it becomes a real comment."""
+def _resolved_entry(entry: dict) -> tomlkit.items.InlineTable:
+    """A resolved entry's fields as a flat inline table — always short (``spoken``, ``count``)."""
     table = tomlkit.inline_table()
     for key, value in entry.items():
         if key != "note":
             table[key] = value
+    return table
+
+
+def _stub_entry(entry: dict) -> tomlkit.items.Table:
+    """A stub's fields as a real ``[siglum]`` table, not one crammed inline line.
+
+    ``candidates`` (a handful of short author: count pairs) stays inline —
+    it fits one line fine. ``bibliography`` — a full citation per author —
+    is left as a plain dict for ``tomlkit`` to auto-expand into its own
+    ``[siglum.bibliography]`` sub-table, one author's citation per line,
+    since no reasonable line width holds more than one of those at a time.
+    """
+    table = tomlkit.table()
+    for key, value in entry.items():
+        if key == "note" or key == "bibliography":
+            continue
+        if isinstance(value, dict):
+            inline = tomlkit.inline_table()
+            for k, v in value.items():
+                inline[k] = v
+            value = inline
+        table[key] = value
+    if "bibliography" in entry:
+        table["bibliography"] = entry["bibliography"]
     return table
 
 
@@ -123,9 +154,13 @@ def add_tier2(directory: Path, system: str, entries: dict[str, dict]) -> list[st
     replace each other, so a stub's own bibliography hints stay stable
     once written rather than churning on every draft run. An entry's own
     ``note`` (if any) is written as a real TOML comment immediately above
-    its key, not a field — see ``_as_inline_table``.
+    its key, not a field. ``tomlkit`` keeps every flat (resolved) entry
+    ahead of every ``[siglum]`` table (stub) regardless of insertion order
+    — required, not cosmetic: TOML reads a bare ``key = value`` after a
+    table header as belonging to that table, so a resolved entry appended
+    after an existing stub would otherwise silently nest inside it.
     """
-    path = _tier2_path(directory, system)
+    path = tier2_path(directory, system)
     doc = tomlkit.parse(path.read_text()) if path.exists() else tomlkit.document()
     added = []
     for siglum, entry in entries.items():
@@ -134,7 +169,7 @@ def add_tier2(directory: Path, system: str, entries: dict[str, dict]) -> list[st
             continue
         if note := entry.get("note"):
             doc.add(tomlkit.comment(note))
-        doc[siglum] = _as_inline_table(entry)
+        doc[siglum] = _resolved_entry(entry) if _resolved(entry) else _stub_entry(entry)
         added.append(siglum)
     if added:
         directory.mkdir(parents=True, exist_ok=True)
@@ -155,12 +190,12 @@ def promote(elocution_dir: Path, directory: Path, system: str) -> list[str]:
     human's editor, and even then only because a human ran this command to
     say so.
     """
-    tier2_path = _tier2_path(directory, system)
-    if not tier2_path.exists():
+    tier2_file = tier2_path(directory, system)
+    if not tier2_file.exists():
         return []
-    drafted = tomllib.loads(tier2_path.read_text())
-    tier1_path = _tier1_path(elocution_dir, system)
-    doc = tomlkit.parse(tier1_path.read_text()) if tier1_path.exists() else tomlkit.document()
+    drafted = tomllib.loads(tier2_file.read_text())
+    tier1_file = tier1_path(elocution_dir, system)
+    doc = tomlkit.parse(tier1_file.read_text()) if tier1_file.exists() else tomlkit.document()
     added = []
     for siglum, entry in drafted.items():
         if siglum.startswith("_") or not _resolved(entry) or siglum in doc:
@@ -171,5 +206,5 @@ def promote(elocution_dir: Path, directory: Path, system: str) -> list[str]:
         added.append(siglum)
     if added:
         elocution_dir.mkdir(parents=True, exist_ok=True)
-        tier1_path.write_text(tomlkit.dumps(doc))
+        tier1_file.write_text(tomlkit.dumps(doc))
     return added

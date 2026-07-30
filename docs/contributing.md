@@ -16,7 +16,7 @@ clobbering your changes on a later run.
 `lecturer.conf` (repo-root, gitignored — personal to this checkout, never committed) is a dev
 override of Cement's own `~/.config/lecturer/lecturer.conf`. Its one setting so far,
 `elocution_dir`, is where `redaction/elocution/canon.py`'s shared sigla canon
-(`classical.toml`) lives — defaulted here to `./elocution/` (itself self-ignoring, like a work
+(`classical_sigla.toml`) lives — defaulted here to `./elocution/` (itself self-ignoring, like a work
 dir) so a dev checkout accumulates its own canon separately from any copy of `lecturer`
 installed for real on the same machine. Delete `lecturer.conf` to fall back to the installed
 default, or point `elocution_dir` wherever you like — `LECTURER_ELOCUTION_DIR` in the

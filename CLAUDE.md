@@ -220,8 +220,8 @@ weave them into the text as spoken digressions. TTS will start with
     Plutarch's *Numa*, listed first in `default_systems()` so it wins the tie against
     biblical's Numbers) the real table is grown externally, in `redaction/elocution/
     canon.py`'s two tiers, rather than by further hand-editing this module: tier 1
-    (`elocution_dir/classical.toml` — this machine's shared canon, valid for every book) and
-    tier 2 (`<work dir>/classical.toml` — this one document's own entries). Both TOML, both
+    (`elocution_dir/classical_sigla.toml` — this machine's shared canon, valid for every book) and
+    tier 2 (`<work dir>/classical_sigla.toml` — this one document's own entries). Both TOML, both
     for the same reason: an entry can carry a real comment recording *why*, the same
     provenance the closed tables keep inline, rather than splitting formats because tier 2
     is also tooling-written — `promote-classical` (below) already proves `tomlkit` writes
@@ -256,7 +256,7 @@ weave them into the text as spoken digressions. TTS will start with
     "Ann." (Tacitus 13x vs. Suetonius 1x — the same collision `citation_pairing.py`'s own
     bullet below already confirmed a genuine citation slip in the book, not a scanner bug);
     two separate real model runs resolved 25 then 2 more (additive, nothing overwritten);
-    promoted into `classical.toml`, idempotent on a second promote; and
+    promoted into `classical_sigla.toml`, idempotent on a second promote; and
     `default_systems(elocution_dir=...)` actually speaking a promoted entry through
     `Elocutor` ("Suetonius, Ner. 49.2" → "Suetonius, Nero forty-nine, two"). Surfaced along
     the way, fixed, unrelated to this feature specifically: `AnthropicProvider.ask` sent
@@ -418,7 +418,7 @@ weave them into the text as spoken digressions. TTS will start with
   only the sections that use it.
 - `texts/` — source monographs (gitignored; copyrighted material).
 - `elocution/` (or wherever `elocution_dir` points) holds `redaction/elocution/canon.py`'s
-  tier 1 — `classical.toml` today, the shared sigla canon every book draws on. Not a work
+  tier 1 — `classical_sigla.toml` today, the shared sigla canon every book draws on. Not a work
   dir (it outlives any one book), but self-ignoring the same way, and gitignored from a dev
   checkout via `lecturer.conf` — see `docs/contributing.md`.
 - Working directories (e.g. `./eros_magic`) are created by the CLI wherever `-o` points
@@ -433,7 +433,7 @@ weave them into the text as spoken digressions. TTS will start with
   so re-runs keep unchanged sections, re-synthesise stale ones, and `--publish` follows
   via mtime; the playlist records the reciter in a comment. Text outputs (`sections/`,
   `redactions/`) hold whatever the last run produced. A work dir may also carry
-  `lexicon.json` (pronunciation) and `classical.toml` (this document's own tier-2 sigla,
+  `lexicon.json` (pronunciation) and `classical_sigla.toml` (this document's own tier-2 sigla,
   `redaction/elocution/canon.py`) — both hand-editable, both grown by a `draft-*` verb
   rather than regenerated wholesale. Each work dir contains a self-ignoring `.gitignore`.
 
@@ -450,7 +450,7 @@ Everything routine is in the `justfile`:
   the top), `redact` (weaving + LLM flags), `recite` (`--variant/--voice/--speed/
   --sections`), `publish`, `draft-lexicon` (drafts pronunciation entries, then stops for
   review), and `draft-classical`/`promote-classical` (draft this document's own
-  `classical.toml` sigla, then graduate one into the shared canon — see
+  `classical_sigla.toml` sigla, then graduate one into the shared canon — see
   `docs/classical-sigla.md`). Verbs resolve their own dependencies: free phases run on
   demand, glossing never runs implicitly.
 
