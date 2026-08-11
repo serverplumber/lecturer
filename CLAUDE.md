@@ -9,7 +9,26 @@ weave them into the text as spoken digressions. TTS will start with
 
 - `lecturer.py` — the cement-based CLI: sets up the work directory and runs extraction.
 - `extraction/` — strategy-pattern extractors (epub, pdf) producing `Section`s of running
-  text with `[^ref]`-anchored footnotes. A section whose title reads as a bibliography
+  text with `[^ref]`-anchored footnotes. `pdf.py`'s `ref` is `p{page}-n{number}` — `page`
+  reads the PDF's own embedded page label (`Page.get_label()`, from its `/PageLabels`,
+  falling back to a raw sequential count only when the PDF has none) rather than that raw
+  count directly, so it names the page a reader would actually see printed rather than the
+  page's raw position in the file. Those two only coincide when nothing precedes a book's
+  own page 1 — every real PDF in this corpus front-loads a cover plus several
+  roman-numeral pages first, which a raw count silently folds into the total, overstating
+  every ref's page by exactly that many. Found (not designed for) via
+  `citation_pairing.py`'s `Citation.ref`, verified by hand against `temple_gates`: the ref
+  said page 83, the PDF's own page label and the page's own printed folio (both) said 70,
+  the book's `/PageLabels` confirms a "Cover" page plus twelve roman-numeral pages (13
+  total) before arabic pagination restarts at page 1 — 83 − 13 = 70 exactly. This isn't
+  just an off-by-N annoyance: this book's own note numbering restarts each chapter, so a
+  wrong page sent a human hand-verifying a locator to a *different, real* note carrying
+  the same number in a later chapter — wrong page, coincidentally real note number there
+  too, not an obviously-broken result. Re-verified after the fix: same 759-footnote count,
+  no `_pairing_holds` warning, and a second real PDF with no embedded page labels at all
+  (`yates_1966_art_of_memory.pdf`) still extracts 542 footnotes identically to before,
+  confirming the fallback preserves old behaviour exactly when a PDF has nothing better to
+  offer. A section whose title reads as a bibliography
   gets a second pass in `pdf.py`: pymupdf's own block detector glues a hanging-indent
   reference list into one blob when consecutive entries don't leave it enough vertical
   gap to split on (entries run straight into each other with no separating space at all),
@@ -254,8 +273,13 @@ weave them into the text as spoken digressions. TTS will start with
     context, not a fact about the siglum worth keeping once resolved. Verified end to end
     against a real re-extraction of `temple_gates`: 27 real candidates, correctly withholding
     "Ann." (Tacitus 13x vs. Suetonius 1x — the same collision `citation_pairing.py`'s own
-    bullet below already confirmed a genuine citation slip in the book, not a scanner bug);
-    two separate real model runs resolved 25 then 2 more (additive, nothing overwritten);
+    bullet below already confirmed a genuine citation slip in the book, not a scanner bug).
+    Left as an open stub in tier 2 regardless: a document's own earlier note concluding
+    *which* author is right is exactly the kind of judgement `draft-classical` and
+    `promote-classical` are built to leave to a human rather than apply automatically — the
+    stub's `locators` (`docs/classical-sigla.md`) are there so whoever makes that call can
+    go verify it against the book itself first. Two separate real model runs resolved 25
+    then 2 more (additive, nothing overwritten);
     promoted into `classical_sigla.toml`, idempotent on a second promote; and
     `default_systems(elocution_dir=...)` actually speaking a promoted entry through
     `Elocutor` ("Suetonius, Ner. 49.2" → "Suetonius, Nero forty-nine, two"). Surfaced along
@@ -325,8 +349,14 @@ weave them into the text as spoken digressions. TTS will start with
     next to the siglum ("Josephus, AJ 18.81–84", "Tacitus, Ann. 2.32") — `pair_sigla`
     counts every (author, siglum) pairing the footnotes' own text supplies, gated on
     `bibliography.py`'s confirmed `is_primary_source` authors so no name is ever guessed,
-    only read. An author cited with no siglum at all ("Livy, 1.36.2–6") is itself a real
-    result — one work, nothing to abbreviate. `collisions` flags a siglum paired with more
+    only read, and keeps a capped sample (three) of `Citation`s (footnote `ref` + the
+    citation's own locator) per pairing — not for identity, already settled, but so a
+    human checking a `draft-classical` stub can go find the actual occurrence rather than
+    trust a bare count. `ref` alone is already a direct grep target against
+    `sections/*.footnotes.txt` in this corpus, which numbers footnotes by page
+    (`[^p70-n105]`) rather than restarting per chapter. An author cited with no siglum at
+    all ("Livy, 1.36.2–6") is itself a real result — one work, nothing to abbreviate.
+    `collisions` flags a siglum paired with more
     than one author in this document rather than silently keeping whichever it saw last;
     verified against `temple_gates`, the one collision it caught ("Ann." — Tacitus and
     Suetonius) turned out to be a genuine citation slip in the book itself, not a scanner

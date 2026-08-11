@@ -25,8 +25,11 @@ A siglum that stays unresolved — genuinely ambiguous, or one the model
 wasn't confident about — isn't just logged and forgotten: it's written into
 ``classical_sigla.toml`` as a stub (``canon.py``'s module docstring), with a
 bibliography hint pulled from the document's own confirmed primary-source
-entries where one names the author, so a human finds a head start sitting
-right where they'd add the entry by hand.
+entries where one names the author, and a capped sample of where the
+citation actually occurs (``citation_pairing.py``'s ``Citation`` — this
+corpus numbers footnotes by page, so its own ``ref`` is already a direct
+grep target against ``sections/*.footnotes.txt``), so a human finds a head
+start sitting right where they'd add the entry by hand.
 """
 
 from collections.abc import Callable
@@ -90,6 +93,11 @@ def _hints(bibliography: list[BibliographyEntry], author: str) -> list[str]:
     return [entry.text for entry in bibliography if author in entry.authors]
 
 
+def _locators(citations: tuple) -> list[str]:
+    """Where a pairing actually occurs — ``[^ref]`` greps straight to the footnote."""
+    return [f"[^{citation.ref}] {citation.locator}" for citation in citations]
+
+
 def _ambiguous_stubs(
     pairings: list[SiglumPairing],
     bibliography: list[BibliographyEntry],
@@ -97,13 +105,12 @@ def _ambiguous_stubs(
 ) -> dict[str, dict]:
     stubs = {}
     for siglum, authors in ambiguous.items():
+        by_author = {p.author: p for p in pairings if p.siglum == siglum and p.author in authors}
         stubs[siglum] = {
             "note": 'ambiguous in this document — add "spoken" once you know which',
-            "candidates": {
-                author: next(
-                    (p.count for p in pairings if p.author == author and p.siglum == siglum), 0
-                )
-                for author in sorted(authors)
+            "candidates": {author: by_author[author].count for author in sorted(authors)},
+            "locators": {
+                author: _locators(by_author[author].citations) for author in sorted(authors)
             },
             "bibliography": {author: _hints(bibliography, author) for author in sorted(authors)},
         }
@@ -180,6 +187,7 @@ def draft(
                         "note": "the model wasn't confident about this one",
                         "author": pairing.author,
                         "count": pairing.count,
+                        "locators": _locators(pairing.citations),
                         "bibliography": _hints(bibliography, pairing.author),
                     }
     added_stubs = add_tier2(directory, "classical", stubs) if stubs else []

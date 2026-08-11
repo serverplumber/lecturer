@@ -60,20 +60,34 @@ hand. A real one, from `temple_gates`:
 ["Ann."]
 candidates = {Suetonius = 1, Tacitus = 13}
 
+["Ann.".locators]
+Suetonius = ["[^p70-n105] 6.12"]
+Tacitus = ["[^p19-n57] 16.14", "[^p26-n78] 6.20", "[^p27-n79] 6.22"]
+
 ["Ann.".bibliography]
 Suetonius = ["Suetonius. Translated by J. C. Rolfe. 3 vols. LCL. 2nd edition. Cambridge: Harvard University Press, 1998."]
 Tacitus = ["Tacitus. The Histories and the Annals. Translated by Clifford H. Moore and John Jackson. 4 vols. LCL. Cambridge: Harvard University Press, 1937."]
 ```
 
-`candidates` gives each author's citation count in this document; `bibliography` is that
-author's own bibliography entry, verbatim, so you don't have to go find it — omitted entirely
-when the document has no bibliography entry for that author at all (which is itself real
-information: see `Ep.`'s stub in the same file — Pliny and Augustine both cite it, neither has
-a bibliography entry here, which is exactly why `pair_sigla` couldn't confirm either one
-structurally and the ambiguity had to be added by hand instead). Here the count (13 vs. 1) and
-the title itself both point at Tacitus's *Annals* — but don't take that as a rule, some books
-really do cite two authors under the same siglum on purpose. Resolve it by adding `spoken`
-under the same header:
+`candidates` gives each author's citation count in this document; `locators` is a capped sample
+(three, at most) of where it actually occurs, `[^ref]` first — this book numbers footnotes by
+its own printed page (`p70-n105` = page 70, note 105 — `extraction/pdf.py` reads that off the
+PDF's own `/PageLabels` when it has them, rather than a raw sequential page count that would
+overcount by however many roman-numeral or unnumbered front-matter pages precede page 1), so
+that's a direct grep target against `sections/*.footnotes.txt` if a plain-text search for "Ann."
+doesn't get you there first — then the citation's own locator ("6.12") to confirm you're looking
+at the right one once you arrive. `bibliography` is that author's own bibliography entry,
+verbatim, so you don't have to go find it — omitted entirely when the document has no
+bibliography entry for that author at all (which is itself real information: see `Ep.`'s stub in
+the same file — Pliny and Augustine both cite it, neither has a bibliography entry here, which is
+exactly why `pair_sigla` couldn't confirm either one structurally and the ambiguity had to be
+added by hand instead, locators included — and worth double-checking each hand-added one against
+`sections/*.footnotes.txt` regardless of how plausible it looks: a first attempt at `Ep.`'s
+Augustine locator cited a real footnote on a real page, just the wrong one, caught only by
+grepping the actual text rather than trusting the ref). Here the count (13 vs. 1) and the title
+itself both point at Tacitus's *Annals* — but don't take that as a rule,
+some books really do cite two authors under the same siglum on purpose; check a locator or two
+before deciding. Resolve it by adding `spoken` under the same header:
 
 ```toml
 ["Ann."]

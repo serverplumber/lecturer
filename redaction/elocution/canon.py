@@ -35,18 +35,19 @@ draft.py``) found but couldn't resolve — genuinely ambiguous in this
 document, or one the model wasn't confident about — with no ``spoken`` key
 at all, so ``_entries`` (and everything downstream of it) ignores it exactly
 as if it weren't there. What it does carry is a real comment recording why,
-and, where the document's own bibliography names the author, a
-``bibliography`` hint — the same abstain-over-guess posture as the near-miss
-review, applied to sigla resolution instead of citation matching: reported,
-not dropped, so a human finds it sitting right where they'd add the entry by
-hand, with a head start rather than a blank line. A resolved entry is a
-short, flat inline table (fits one line: ``spoken``, maybe ``count``); a
-stub is a real ``[siglum]`` table instead — TOML forbids a newline inside
-``{...}`` (``tomllib`` rejects it outright), and a stub's own
-``bibliography`` — a whole citation per author — never fits one reasonable
-line regardless, so it gets its own ``[siglum.bibliography]`` sub-table, one
-author's citation per line, rather than one line straining to hold all of
-it.
+a ``bibliography`` hint where the document's own bibliography names the
+author, and a capped sample of ``locators`` (``citation_pairing.py``'s
+``Citation``) — where the citation actually sits, so a human can go check
+the source rather than trust a bare count — the same abstain-over-guess
+posture as the near-miss review, applied to sigla resolution instead of
+citation matching: reported, not dropped, so a human finds it sitting right
+where they'd add the entry by hand, with a head start rather than a blank
+line. A resolved entry is a short, flat inline table (fits one line:
+``spoken``, maybe ``count``); a stub is a real ``[siglum]`` table instead —
+TOML forbids a newline inside ``{...}`` (``tomllib`` rejects it outright),
+and fields like ``bibliography``/``locators`` — one entry per author, never
+short — get their own ``[siglum.field]`` sub-table, one line each, rather
+than straining to hold it all inline.
 """
 
 import tomllib
@@ -120,15 +121,21 @@ def _resolved_entry(entry: dict) -> tomlkit.items.InlineTable:
 def _stub_entry(entry: dict) -> tomlkit.items.Table:
     """A stub's fields as a real ``[siglum]`` table, not one crammed inline line.
 
-    ``candidates`` (a handful of short author: count pairs) stays inline —
-    it fits one line fine. ``bibliography`` — a full citation per author —
-    is left as a plain dict for ``tomlkit`` to auto-expand into its own
-    ``[siglum.bibliography]`` sub-table, one author's citation per line,
-    since no reasonable line width holds more than one of those at a time.
+    A dict field whose values are all scalars (``candidates``: author ->
+    count) stays inline — it fits one line fine. A dict field whose values
+    are lists (``bibliography``, ``locators``: author -> [...]) is left as a
+    plain dict for ``tomlkit`` to auto-expand into its own
+    ``[siglum.field]`` sub-table, one entry per line, since no reasonable
+    line width holds more than one of those at a time — shape-driven, not a
+    fixed list of field names, so a future field gets this for free.
     """
     table = tomlkit.table()
+    expand = {}
     for key, value in entry.items():
-        if key == "note" or key == "bibliography":
+        if key == "note":
+            continue
+        if isinstance(value, dict) and any(isinstance(v, list) for v in value.values()):
+            expand[key] = value
             continue
         if isinstance(value, dict):
             inline = tomlkit.inline_table()
@@ -136,8 +143,8 @@ def _stub_entry(entry: dict) -> tomlkit.items.Table:
                 inline[k] = v
             value = inline
         table[key] = value
-    if "bibliography" in entry:
-        table["bibliography"] = entry["bibliography"]
+    for key, value in expand.items():
+        table[key] = value
     return table
 
 

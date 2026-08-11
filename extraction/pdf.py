@@ -85,11 +85,23 @@ class PdfExtractor:
     def extract(self, document: Path) -> Extraction:
         with pymupdf.open(document) as doc:
             pages = [_page_blocks(page) for page in doc]
+            # The PDF's own printed page number, when it embeds one (most
+            # born-digital books do, via /PageLabels) — front matter is
+            # commonly roman-numbered or unnumbered, so the raw 1-based
+            # sequential position (used everywhere else here, matching the
+            # outline's own page indexing) routinely overcounts a footnote's
+            # *displayed* page by exactly however many such pages precede it.
+            # A ref built from that raw count still works as an internal,
+            # unique anchor, but sends a human to the wrong printed page —
+            # and since a book's note numbering commonly restarts each
+            # chapter, "wrong page, coincidentally real note number there
+            # too" is a real failure mode, not just an off-by-N annoyance.
+            page_labels = [page.get_label() or str(i) for i, page in enumerate(doc, start=1)]
             outline = doc.get_toc()
 
         body_size, note_size = _font_profile(pages)
         furniture = _furniture(pages)
-        page_texts, notes = _assemble(pages, body_size, note_size, furniture)
+        page_texts, notes = _assemble(pages, page_labels, body_size, note_size, furniture)
         # Footnote mode only holds if the superscript anchors in the body
         # actually pair with the parsed notes. On scanned books the pairing
         # collapses (OCR font jitter, no real anchors) and the "notes" are
@@ -102,7 +114,7 @@ class PdfExtractor:
                 "have footnotes",
                 stacklevel=2,
             )
-            page_texts, notes = _assemble(pages, body_size, None, furniture)
+            page_texts, notes = _assemble(pages, page_labels, body_size, None, furniture)
         sections = _split_sections(pages, page_texts, notes, outline, body_size, furniture)
         return Extraction(sections=sections)
 
@@ -126,14 +138,25 @@ def read_metadata(document: Path) -> Metadata:
 
 def _assemble(
     pages: list[list[list[_Line]]],
+    page_labels: list[str],
     body_size: float,
     note_size: float | None,
     furniture: set[str],
 ) -> tuple[list[list[str]], list[tuple[int, Footnote]]]:
-    """Extract every page: its body paragraphs, and (page, footnote) pairs."""
+    """Extract every page: its body paragraphs, and (page, footnote) pairs.
+
+    ``page_number`` (sequential, matching the outline's own page indexing)
+    still drives every internal comparison — whether a note continues onto
+    the next page, which section a note's page falls in. ``page_labels``
+    supplies the *displayed* page instead, purely for building a
+    human-readable ``ref`` — the two only coincide when a book has no front
+    matter ahead of its own page 1.
+    """
     page_texts: list[list[str]] = []
     notes: list[tuple[int, Footnote]] = []
-    for page_number, blocks in enumerate(pages, start=1):
+    for page_number, (blocks, page_label) in enumerate(
+        zip(pages, page_labels, strict=True), start=1
+    ):
         paragraphs: list[str] = []
         # Heading-sized blocks are never furniture: a chapter heading often
         # repeats verbatim as the running head of its own pages, and only
@@ -158,11 +181,9 @@ def _assemble(
             note_flags = [False] * len(content)
         for block, is_note in zip(content, note_flags, strict=True):
             if is_note:
-                paragraphs.extend(_parse_notes(block, page_number, notes))
+                paragraphs.extend(_parse_notes(block, page_number, page_label, notes))
             else:
-                paragraphs.append(
-                    _body_text(block, page_number, mark_anchors=note_size is not None)
-                )
+                paragraphs.append(_body_text(block, page_label, mark_anchors=note_size is not None))
         page_texts.append([p for p in paragraphs if p])
     return page_texts, notes
 
@@ -381,16 +402,17 @@ def _is_note_block(block: list[_Line], body_size: float, note_size: float | None
 
 
 def _parse_notes(
-    block: list[_Line], page_number: int, notes: list[tuple[int, Footnote]]
+    block: list[_Line], page_number: int, page_label: str, notes: list[tuple[int, Footnote]]
 ) -> list[str]:
     """Add the block's notes to ``notes`` as (page, footnote) pairs, line by line.
 
     A line opening with "N." starts note N of this page; other lines
     continue the previous note, provided that note started on this page or
-    the one before (notes do run over page breaks). Lines that belong to no
-    note — small-face content like index entries whose running head dodged
-    the furniture filter — are returned so the caller can keep them as
-    body text instead.
+    the one before (notes do run over page breaks — ``page_number``, the
+    sequential count, decides that; ``page_label`` only names the ref).
+    Lines that belong to no note — small-face content like index entries
+    whose running head dodged the furniture filter — are returned so the
+    caller can keep them as body text instead.
     """
     leftovers = []
     for line in block:
@@ -399,7 +421,7 @@ def _parse_notes(
             continue
         if start := _NOTE_START.match(text):
             number, body = start.groups()
-            notes.append((page_number, Footnote(ref=f"p{page_number}-n{number}", text=body)))
+            notes.append((page_number, Footnote(ref=f"p{page_label}-n{number}", text=body)))
         elif notes and page_number - notes[-1][0] <= 1:
             last = notes[-1][1]
             last.text = _flatten(f"{last.text} {text}")
@@ -408,7 +430,7 @@ def _parse_notes(
     return leftovers
 
 
-def _body_text(block: list[_Line], page_number: int, mark_anchors: bool) -> str:
+def _body_text(block: list[_Line], page_label: str, mark_anchors: bool) -> str:
     """Flatten a body block, replacing superscript note anchors with markers."""
     lines = []
     for line in block:
@@ -416,7 +438,7 @@ def _body_text(block: list[_Line], page_number: int, mark_anchors: bool) -> str:
         for span in line.spans:
             anchor = span.text.strip()
             if mark_anchors and span.superscript and anchor.isdigit():
-                parts.append(f"[^p{page_number}-n{anchor}]")
+                parts.append(f"[^p{page_label}-n{anchor}]")
             else:
                 parts.append(span.text)
         lines.append("".join(parts))

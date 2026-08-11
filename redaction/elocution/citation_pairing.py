@@ -45,17 +45,44 @@ _SIGLUM_TOKEN = r"[A-Za-z][\w.'&-]*"
 _SIGLUM = rf"{_SIGLUM_TOKEN}(?:\s+{_SIGLUM_TOKEN}){{0,4}}"
 
 
+_MAX_CITATIONS = 3
+# A sample, not the full count -- a siglum cited a dozen times doesn't need a
+# dozen locators to check by hand, and every footnote here numbers by page
+# (``[^p59-n69]``, this corpus's own convention), so ``ref`` alone is already
+# a direct grep target against ``sections/*.footnotes.txt`` regardless of
+# which page or chapter it actually falls on.
+
+
+@dataclass(frozen=True)
+class Citation:
+    """Where one citation actually sits — enough to find it again by hand.
+
+    ``ref`` is the footnote's own id (``Footnote.ref``); ``[^{ref}]`` is the
+    literal anchor ``write_sections`` writes into ``sections/*.footnotes.txt``,
+    so it's directly greppable. ``locator`` is the citation's own numeric
+    locator ("15.44") — extra confirmation once you're looking at the note,
+    since one footnote can carry more than one citation.
+    """
+
+    ref: str
+    locator: str
+
+
 @dataclass(frozen=True)
 class SiglumPairing:
     """One (author, siglum) pair the footnotes actually paired, and how often.
 
     ``siglum`` is ``None`` when the author is cited by a bare locator with
     no work abbreviation at all — a real, useful outcome, not a miss.
+    ``citations`` is a capped sample (``_MAX_CITATIONS``) of where this
+    pairing actually occurs, for a human to check against the source rather
+    than trust ``count`` alone.
     """
 
     author: str
     siglum: str | None
     count: int
+    citations: tuple[Citation, ...] = ()
 
 
 def known_primary_authors(entries: Sequence[BibliographyEntry]) -> list[str]:
@@ -89,18 +116,27 @@ def pair_sigla(
     One combined pass over every footnote, gated on the closed list of
     already-confirmed primary-source authors — an author absent from that
     list never enters a pairing, no matter how citation-shaped the text
-    around a name looks.
+    around a name looks. Alongside the count, keeps a capped sample of
+    where each pairing actually occurs (``Citation``) — a locator a human
+    can go check by hand rather than a bare number to take on faith.
     """
     authors = known_primary_authors(entries)
     if not authors:
         return []
     pattern = _citation_pattern(authors)
     counts: Counter[tuple[str, str | None]] = Counter()
+    citations: dict[tuple[str, str | None], list[Citation]] = {}
     for note in footnotes:
         for match in pattern.finditer(note.text):
-            counts[(match.group("author"), match.group("siglum"))] += 1
+            key = (match.group("author"), match.group("siglum"))
+            counts[key] += 1
+            sample = citations.setdefault(key, [])
+            if len(sample) < _MAX_CITATIONS:
+                sample.append(Citation(ref=note.ref, locator=match.group("locator")))
     return [
-        SiglumPairing(author=author, siglum=siglum, count=count)
+        SiglumPairing(
+            author=author, siglum=siglum, count=count, citations=tuple(citations[(author, siglum)])
+        )
         for (author, siglum), count in counts.items()
     ]
 
