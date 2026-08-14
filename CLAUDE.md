@@ -1,9 +1,22 @@
 # Lecturer
 
-Text-to-voice pipeline that turns monographs into audiobooks sounding like the author
-lecturing from their own book. Planned hard part: extracting footnotes and having an LLM
-weave them into the text as spoken digressions. TTS will start with
-[Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M).
+Text-to-voice pipeline turning monographs into audiobooks that sound like the author lecturing
+from his own book. Runs end to end today: extraction (EPUB, PDF) → redaction (ordered layers
+producing manner-tagged utterances) → recitation (Kokoro-82M via kokoro-onnx) → publish (per-section
+Opus, M3U, chaptered `.m4b`).
+
+The apparatus is the whole problem. Footnotes are woven into the spoken text as digressions,
+citation sigla are dictated rather than read as written, and the bibliography is parsed into
+structure only where the document's own house style has been confirmed. Three weaving variants
+fork the output tree: `book`, `glossed`, `verbatim`.
+
+Standing constraint on the LLM's role, which most decisions below follow from: it does work whose
+output can be checked, and nothing else. Its asks are narrowed until they're verifiable (expand a
+confirmed author-siglum pair, don't guess authorship); its results become hand-editable TOML
+artefacts that deterministic code consumes, never runtime behaviour; generated prose is guarded by
+a verbatim faithfulness check with a deterministic fallback; and genuine ambiguity abstains and
+reports where to look rather than resolving. When a change here would let the model decide
+something unverifiable, that's the thing to push back on.
 
 ## Layout
 
