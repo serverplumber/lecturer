@@ -107,3 +107,7 @@ Source monographs live in `texts/`, which is gitignored — the corpus is copyri
 ## Licence
 
 ISC.
+
+______________________________________________________________________
+
+> *For my father, who could bend beams with his mind and poked me with a sharp stick until I was good at mathematics.*
