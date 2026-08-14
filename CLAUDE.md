@@ -565,6 +565,27 @@ Everything routine is in the `justfile`:
   reconstruct usage from a truncated call after the fact, which would mean reaching
   into `anthropic.lib._parse`'s private internals to get at a `Message.usage` that
   never survives the SDK's own `ValidationError` unwind.
+- **Edge case, surfaced switching this project's own default model**: `gloss_cache.json`
+  is scoped per model, not per paragraph — `Glossator._key` hashes `provider.label`
+  (which encodes the model name) alongside the paragraph and its notes, so bumping
+  `DEFAULT_MODELS`' Anthropic default (as this session did, `claude-opus-4-8` →
+  `claude-opus-5`) silently orphans every cache entry a prior run made under the old
+  model: not a bug in the lookup, a real consequence of intentionally not mixing two
+  models' prose within one book, but a costly surprise if it happens silently. Confirmed
+  concretely against `eros_magic`'s own real `gloss_cache.json` (145 entries from a real
+  prior run): `estimate-gloss` reported 150 remaining paragraphs under the old default,
+  295 (every one of the 145 no longer hitting) under the new one. `Redact._default`
+  (`lecturer.py`) now warns before spending anything: `Glossator.stale_cache_entries`
+  (shares its paragraph walk with `pending_paragraphs` via the private `_annotated`
+  generator, so the two can't drift apart) counts cache entries that match no paragraph
+  in the current script under the *current* model, and `redact --llm` logs how many of
+  the cache's entries won't be reused before making any billed call. Not proof the cause
+  is specifically a model change (an edited source text or a changed weaving pipeline
+  would also orphan entries), but it's the single most likely cause and cheap to check.
+  No `--sections`-style per-chapter scoping exists on `redact` (that flag is
+  `recite`/`publish`-only, for choosing which sections get *audio*) — there's currently
+  no way to gloss only part of a book to sidestep this; the cache is already
+  paragraph-cheap on a re-run (skips everything unaffected), the warning is what's new.
 
 Use `uv` for all dependency management (`uv add`, `uv add --dev`), never pip. direnv
 activates the venv; `.envrc` runs `uv sync` on entry.

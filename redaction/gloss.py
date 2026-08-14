@@ -23,7 +23,7 @@ inputs only — context refinements never invalidate finished work.
 import hashlib
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -155,6 +155,10 @@ class Glossator:
     def gloss_truncated(self) -> int:
         return getattr(self.provider, "truncated", 0) - self._baseline_truncated
 
+    @property
+    def cache_size(self) -> int:
+        return len(self._cache)
+
     def redact(self, script: Script) -> Script:
         return Script(sections=[self._gloss_section(section) for section in script.sections])
 
@@ -222,16 +226,17 @@ class Glossator:
             return None
         return [piece.model_dump() for piece in woven.pieces if piece.text.strip()]
 
-    def pending_paragraphs(self, script: Script) -> list[PendingParagraph]:
-        """Paragraphs a real ``redact --llm`` run would still call the model for.
+    def _annotated(
+        self, script: Script
+    ) -> Iterator[tuple[str, int, str, dict[str, Footnote], str | None, str]]:
+        """Every annotated paragraph in ``script``, cached or not.
 
-        Mirrors ``_gloss_section``/``_gloss_utterance``'s own walk exactly —
-        same annotated-paragraph detection, same context, same cache-key
-        lookup — but never calls the model. ``script`` is expected to have
-        already been through ``SeamMender``, matching where the glossator
-        sits in ``redact()``'s layer order; used by ``redaction/estimate.py``.
+        Yields ``(section_title, section_index, paragraph_text, notes,
+        context, key)`` — the one walk shared by ``pending_paragraphs`` and
+        ``stale_cache_entries`` so the two can't drift apart. ``script`` is
+        expected to have already been through ``SeamMender``, matching where
+        the glossator sits in ``redact()``'s layer order.
         """
-        pending: list[PendingParagraph] = []
         for section_index, section in enumerate(script.sections):
             notes = {note.ref: note for note in section.footnotes}
             annotated = any(
@@ -247,18 +252,43 @@ class Glossator:
                     continue
                 present = {ref: notes[ref] for ref in refs if ref in notes}
                 key = self._key(utterance.text, present)
-                if key in self._cache:
-                    continue
-                pending.append(
-                    PendingParagraph(
-                        section_title=section.title,
-                        section_index=section_index,
-                        request=_request_text(section.title, utterance.text, present),
-                        context=context,
-                        key=key,
-                    )
-                )
-        return pending
+                yield section.title, section_index, utterance.text, present, context, key
+
+    def pending_paragraphs(self, script: Script) -> list[PendingParagraph]:
+        """Paragraphs a real ``redact --llm`` run would still call the model for.
+
+        Never calls the model — used by ``redaction/estimate.py``.
+        """
+        return [
+            PendingParagraph(
+                section_title=title,
+                section_index=index,
+                request=_request_text(title, text, notes),
+                context=context,
+                key=key,
+            )
+            for title, index, text, notes, context, key in self._annotated(script)
+            if key not in self._cache
+        ]
+
+    def stale_cache_entries(self, script: Script) -> int:
+        """Cached glosses in this work dir that match no paragraph in ``script``.
+
+        ``_key`` hashes ``provider.label`` (which encodes the model) into
+        every cache key, so switching the configured model — including via
+        ``DEFAULT_MODELS``' own default changing between runs — silently
+        orphans every entry a prior run under the old model produced: not a
+        cache lookup failure, a real edge case, since those paragraphs will
+        be re-sent and re-billed rather than reused. Editing the source text
+        or this file's own weaving pipeline would also orphan entries, so a
+        nonzero count here isn't proof of a model change specifically — but
+        it's the single most likely cause, and cheap to check. See
+        CLAUDE.md's Glossator section for how this was found (a real ~145
+        entries orphaned in a real work dir's gloss_cache.json switching
+        this project's own default model mid-book) and confirmed.
+        """
+        matched = {key for *_, key in self._annotated(script) if key in self._cache}
+        return len(self._cache) - len(matched)
 
     def _key(self, paragraph: str, notes: dict[str, Footnote]) -> str:
         payload = json.dumps(

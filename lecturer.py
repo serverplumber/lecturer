@@ -38,6 +38,7 @@ from redaction import (
     redact,
     render_estimate,
 )
+from redaction.mend import SeamMender
 from redaction.usage import append_usage, new_record
 
 WORKING_TEXT = "working_text"
@@ -399,6 +400,17 @@ class Redact(Controller):
                     synopsis=synopsis,
                     log=self.app.log.info,
                 )
+                stale = weaver.stale_cache_entries(
+                    SeamMender().redact(Script.from_extraction(extraction))
+                )
+                if stale:
+                    self.app.log.warning(
+                        f"{stale} of {weaver.cache_size} cached gloss(es) in gloss_cache.json "
+                        f"don't match any paragraph under {provider.label} — most likely "
+                        "glossed under a different model or prompt; those paragraphs will be "
+                        "re-sent and re-billed this run (run `estimate-gloss` first to see the "
+                        "real cost)"
+                    )
             if self.app.pargs.interpret:
                 interpreter = TongueInterpreter(
                     provider=_provider(self.app, TAGGING_MODELS),
