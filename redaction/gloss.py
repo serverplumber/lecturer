@@ -24,6 +24,7 @@ import hashlib
 import json
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -98,6 +99,21 @@ def ensure_synopsis(extraction, provider: Provider, path: Path, log=lambda m: No
     return answer.synopsis.strip()
 
 
+@dataclass
+class PendingParagraph:
+    """One paragraph a real ``redact --llm`` run would still call the model for.
+
+    Built by :meth:`Glossator.pending_paragraphs` for
+    ``redaction/estimate.py``'s cost estimate — never sent anywhere.
+    """
+
+    section_title: str
+    section_index: int  # groups paragraphs by chapter even if two sections share a title
+    request: str
+    context: str | None
+    key: str
+
+
 class Glossator:
     """LLM counterpart to the deterministic FootnoteWeaver."""
 
@@ -115,6 +131,29 @@ class Glossator:
         if cache_path is not None and cache_path.exists():
             self._cache = json.loads(cache_path.read_text())
         self._log = log
+        # Billed calls this instance has actually made (cache misses that
+        # reached _ask, truncated ones included) — the honest denominator for
+        # a per-paragraph output average, since a resumed run's cache hits
+        # cost nothing more. Token counters baseline against the provider's
+        # own running totals at construction time, so usage the provider
+        # accrued before this Glossator existed (e.g. ensure_synopsis, called
+        # just before construction in lecturer.py) is never attributed here.
+        self.calls = 0
+        self._baseline_input = provider.input_tokens
+        self._baseline_output = provider.output_tokens
+        self._baseline_truncated = getattr(provider, "truncated", 0)
+
+    @property
+    def gloss_input_tokens(self) -> int:
+        return self.provider.input_tokens - self._baseline_input
+
+    @property
+    def gloss_output_tokens(self) -> int:
+        return self.provider.output_tokens - self._baseline_output
+
+    @property
+    def gloss_truncated(self) -> int:
+        return getattr(self.provider, "truncated", 0) - self._baseline_truncated
 
     def redact(self, script: Script) -> Script:
         return Script(sections=[self._gloss_section(section) for section in script.sections])
@@ -159,6 +198,7 @@ class Glossator:
         key = self._key(utterance.text, present)
         pieces = self._cache.get(key)
         if pieces is None:
+            self.calls += 1
             pieces = self._ask(section_title, utterance.text, present, context)
             if pieces is None:
                 return weave_utterance(utterance, notes, woven)
@@ -176,18 +216,49 @@ class Glossator:
         notes: dict[str, Footnote],
         context: str | None = None,
     ) -> list[dict] | None:
-        notes_block = "\n".join(f"[^{ref}]: {note.text}" for ref, note in notes.items())
-        request = (
-            f"Section: {section_title}\n\nParagraph:\n{paragraph}\n\nFootnotes:\n{notes_block}"
-            "\n\nRemember: body pieces are verbatim, but digressions are never copied "
-            "from the note — respeak the note's substance aloud in the author's voice "
-            "and drop the bibliographic apparatus. A purely bibliographic note "
-            "produces no digression at all."
-        )
+        request = _request_text(section_title, paragraph, notes)
         woven = self.provider.ask(_SYSTEM, request, WovenParagraph, context=context)
         if woven is None or not _faithful(woven, paragraph):
             return None
         return [piece.model_dump() for piece in woven.pieces if piece.text.strip()]
+
+    def pending_paragraphs(self, script: Script) -> list[PendingParagraph]:
+        """Paragraphs a real ``redact --llm`` run would still call the model for.
+
+        Mirrors ``_gloss_section``/``_gloss_utterance``'s own walk exactly —
+        same annotated-paragraph detection, same context, same cache-key
+        lookup — but never calls the model. ``script`` is expected to have
+        already been through ``SeamMender``, matching where the glossator
+        sits in ``redact()``'s layer order; used by ``redaction/estimate.py``.
+        """
+        pending: list[PendingParagraph] = []
+        for section_index, section in enumerate(script.sections):
+            notes = {note.ref: note for note in section.footnotes}
+            annotated = any(
+                utterance.manner is Manner.BODY and ANCHOR.search(utterance.text)
+                for utterance in section.utterances
+            )
+            context = self._context(section) if annotated else None
+            for utterance in section.utterances:
+                if utterance.manner is not Manner.BODY:
+                    continue
+                refs = [match.group(1) for match in ANCHOR.finditer(utterance.text)]
+                if not refs:
+                    continue
+                present = {ref: notes[ref] for ref in refs if ref in notes}
+                key = self._key(utterance.text, present)
+                if key in self._cache:
+                    continue
+                pending.append(
+                    PendingParagraph(
+                        section_title=section.title,
+                        section_index=section_index,
+                        request=_request_text(section.title, utterance.text, present),
+                        context=context,
+                        key=key,
+                    )
+                )
+        return pending
 
     def _key(self, paragraph: str, notes: dict[str, Footnote]) -> str:
         payload = json.dumps(
@@ -198,7 +269,25 @@ class Glossator:
 
     def _save_cache(self) -> None:
         if self._cache_path is not None:
-            self._cache_path.write_text(json.dumps(self._cache, ensure_ascii=False, indent=1))
+            partial = self._cache_path.with_suffix(self._cache_path.suffix + ".part")
+            partial.write_text(json.dumps(self._cache, ensure_ascii=False, indent=1))
+            partial.rename(self._cache_path)
+
+
+def _request_text(section_title: str, paragraph: str, notes: dict[str, Footnote]) -> str:
+    """The per-paragraph request text — shared by ``_ask`` and ``pending_paragraphs``.
+
+    Kept in one place so a cost estimate (which never calls the model) sends
+    ``count_tokens`` exactly the text a real call would send.
+    """
+    notes_block = "\n".join(f"[^{ref}]: {note.text}" for ref, note in notes.items())
+    return (
+        f"Section: {section_title}\n\nParagraph:\n{paragraph}\n\nFootnotes:\n{notes_block}"
+        "\n\nRemember: body pieces are verbatim, but digressions are never copied "
+        "from the note — respeak the note's substance aloud in the author's voice "
+        "and drop the bibliographic apparatus. A purely bibliographic note "
+        "produces no digression at all."
+    )
 
 
 def _faithful(woven: WovenParagraph, paragraph: str) -> bool:

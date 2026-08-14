@@ -478,7 +478,13 @@ something unverifiable, that's the thing to push back on.
   `redactions/`) hold whatever the last run produced. A work dir may also carry
   `lexicon.json` (pronunciation) and `classical_sigla.toml` (this document's own tier-2 sigla,
   `redaction/elocution/canon.py`) — both hand-editable, both grown by a `draft-*` verb
-  rather than regenerated wholesale. Each work dir contains a self-ignoring `.gitignore`.
+  rather than regenerated wholesale — and, once a real `redact --llm` run has made at
+  least one billed call, `gloss_usage.jsonl` (`redaction/usage.py`): one JSON object
+  per run, appended rather than overwritten, recording that run's real input/output
+  tokens, billed-call count, truncated-call count, provider label, and timestamp —
+  the ground truth `estimate-gloss` extrapolates a per-paragraph output average from,
+  since there's no API for predicting a call's output size ahead of time. Each work dir
+  contains a self-ignoring `.gitignore`.
 
 ## Commands
 
@@ -490,12 +496,75 @@ Everything routine is in the `justfile`:
 - `just lint` / `just fmt` / `just check` — ruff, same as the commit hooks run.
 - `just run -o <dir>` — the whole chain to publish, default settings. The phases are
   verbs — `extract` (takes the document; a different one prompts before rebuilding from
-  the top), `redact` (weaving + LLM flags), `recite` (`--variant/--voice/--speed/
+  the top), `redact` (weaving + LLM flags), `estimate-gloss` (what a `redact --llm` run
+  would still cost, spending nothing — see below), `recite` (`--variant/--voice/--speed/
   --sections`), `publish`, `draft-lexicon` (drafts pronunciation entries, then stops for
   review), and `draft-classical`/`promote-classical` (draft this document's own
   `classical_sigla.toml` sigla, then graduate one into the shared canon — see
   `docs/classical-sigla.md`). Verbs resolve their own dependencies: free phases run on
   demand, glossing never runs implicitly.
+- `estimate-gloss -o <dir>` — a distinct verb rather than a `redact --estimate` flag,
+  since it doesn't do redaction's job. Loads the pipeline through the same layers
+  `redact --llm` would before the glossator itself runs (`SeamMender`, then the
+  glossator's own `gloss_cache.json` lookup, so already-cached paragraphs cost nothing
+  and are excluded), and prices the rest with `count_tokens` (a free endpoint) for
+  input; output is extrapolated from this book's own `gloss_usage.jsonl` call history,
+  or flagged as unknown on a book's first-ever `--llm` run rather than guessed from
+  another book's numbers. Printed as plain prose, not a table — the actual accessible
+  form for a blind user, who can't glance at a dashboard to sanity-check a run's cost.
+  Anthropic only for v1 (`redaction/estimate.py`): OpenAI has different pricing and no
+  identically-named free token-counting endpoint. `redaction/providers.py`'s
+  `AnthropicProvider.count_input_tokens` mirrors `ask`'s own request construction
+  exactly (system/context/effort/thinking, including the adaptive-thinking fallback),
+  so the free count matches what a real call would actually be billed for; called with
+  `system=None` in the estimator to isolate one paragraph's own request tokens from the
+  cached system+chapter-context prefix (Anthropic's `cache_control` on the context
+  block caches everything up to and including it, system prompt included) — diffing a
+  paragraph's full-call count against its no-context count cancels the request's own
+  cost out exactly, rather than approximating it from a separate placeholder call.
+  Chapters are grouped by section *position*, not title text: two sections sharing a
+  title (real in this corpus's PDF outlines) would otherwise collapse into one chapter
+  and drop one context's tokens. A book with no `synopsis.txt` yet is priced with its
+  own extra one-off call (`ensure_synopsis`'s real request, truncated the same way,
+  `count_tokens`'d the same way) rather than silently reported as free — verified
+  against `lull_bruno` (no synopsis yet): a real 208,322-token, ~$1.04 synopsis call
+  correctly reported separate from the 438-paragraph per-paragraph total. Verified
+  end to end against `eros_magic` and `temple_gates` (both already glossed some
+  paragraphs, so gloss_cache.json correctly excludes those): real dollar estimates for
+  the true remainder, no crash, no network spend beyond `count_tokens` itself; a
+  synthesized `gloss_usage.jsonl` (13 real calls, 1 truncated) correctly turned the
+  cold-start "output cost cannot be estimated yet" message into a full priced estimate
+  matching the input+output arithmetic by hand ($3.75 input + $3.60 output = $7.35);
+  and an unpriced model (`--model claude-opus-4-7`, not in `estimate.py`'s pricing
+  table) correctly abstained from a dollar figure while still reporting the real total
+  token count, the same abstain-over-guess posture as `bibliography.py`'s
+  `sniff_style`. `Glossator.calls`/`.gloss_input_tokens`/`.gloss_output_tokens`/
+  `.gloss_truncated` baseline against the provider's own running counters at
+  construction time specifically so `ensure_synopsis`'s call (made on the same
+  provider instance, just before the Glossator is constructed, in `lecturer.py`'s
+  `Redact._default`) never pollutes the persisted per-paragraph average — verified by
+  constructing a `Glossator` against a fake provider pre-loaded with nonzero
+  input/output counters (simulating a synopsis call that already ran) and confirming
+  `gloss_input_tokens`/`gloss_output_tokens` read back only what the Glossator's own
+  calls added, not the pre-existing total. A truncated call (the `ValidationError`
+  path in `AnthropicProvider.ask`) still counts toward `Glossator.calls` — the honest
+  denominator for a per-paragraph output average is *billed calls*, not paragraphs,
+  since a resumed run's cache hits cost nothing more — but contributes no tokens to
+  `gloss_output_tokens` (there's nothing to add: `response` is local to the SDK's own
+  post-parser closure and never reaches the `except` clause), so `gloss_truncated`
+  tracks it separately for `gloss_usage.jsonl` to disclose rather than silently
+  under-report. Persisting these counters as ground truth first needed
+  `AnthropicProvider.ask`'s `max_tokens` raised from 8000 to 24000 (the one-line fix
+  `docs/planned/budget-confirmation.md` had already settled, applied here since
+  cost-estimate.md's own groundwork required trustworthy counters first): a truncated
+  call is billed by Anthropic in full but was never reaching `input_tokens`/
+  `output_tokens` at all, so persisting truncation-prone counters as-is would have
+  baked in a silent, one-directional undercount that gets worse the more a run
+  truncates. Raising the ceiling removes the truncation class outright — free, since
+  billing is by tokens actually generated, not the ceiling — rather than trying to
+  reconstruct usage from a truncated call after the fact, which would mean reaching
+  into `anthropic.lib._parse`'s private internals to get at a `Message.usage` that
+  never survives the SDK's own `ValidationError` unwind.
 
 Use `uv` for all dependency management (`uv add`, `uv add --dev`), never pip. direnv
 activates the venv; `.envrc` runs `uv sync` on entry.

@@ -34,8 +34,11 @@ from redaction import (
     TongueInterpreter,
     Utterance,
     ensure_synopsis,
+    estimate_gloss_cost,
     redact,
+    render_estimate,
 )
+from redaction.usage import append_usage, new_record
 
 WORKING_TEXT = "working_text"
 
@@ -407,6 +410,45 @@ class Redact(Controller):
             self.app.exit_code = 1
             return
         _redact_phase(self.app, directory, extraction, weaver=weaver, interpreter=interpreter)
+
+
+class EstimateGloss(Controller):
+    class Meta:
+        label = "estimate-gloss"
+        stacked_on = "base"
+        stacked_type = "nested"
+        help = "print a real cost estimate for redact --llm, without spending anything"
+        description = (
+            "Compute and print what the remaining redact --llm work would cost, using "
+            "count_tokens (free) for input and this book's own gloss_usage.jsonl call "
+            "history for output. Spends nothing. Anthropic only for now."
+        )
+        arguments = [_OUTPUT_ARGUMENT, *_PROVIDER_ARGUMENTS]
+
+    def _default(self):
+        directory = _existing_workdir(self.app)
+        if directory is None:
+            return
+        if self.app.pargs.provider != "anthropic":
+            self.app.log.error(
+                "estimate-gloss only supports --provider anthropic for now "
+                "(no free token-counting endpoint for OpenAI)"
+            )
+            self.app.exit_code = 1
+            return
+        extraction = _extract_phase(self.app, directory, None)
+        if extraction is None:
+            return
+        try:
+            provider = _provider(self.app, DEFAULT_MODELS)
+        except ProviderError as error:
+            self.app.log.error(str(error))
+            self.app.exit_code = 1
+            return
+        synopsis_path = directory / "synopsis.txt"
+        synopsis = synopsis_path.read_text().strip() if synopsis_path.exists() else None
+        estimate = estimate_gloss_cost(extraction, provider, directory, synopsis)
+        print(render_estimate(estimate))
 
 
 class Recite(Controller):
@@ -782,6 +824,22 @@ def _redact_phase(app, directory: Path, extraction: Extraction, *, weaver, inter
                     f"{name} used {provider.input_tokens} input + "
                     f"{provider.output_tokens} output tokens on {provider.label}"
                 )
+        if isinstance(layer, Glossator) and layer.calls:
+            # Excludes whatever ensure_synopsis spent on this same provider
+            # instance before the Glossator existed (gloss_input_tokens/
+            # gloss_output_tokens baseline against the provider's counters at
+            # construction time) — a per-paragraph average built from this
+            # record would otherwise be skewed by one large one-off call.
+            append_usage(
+                directory / "gloss_usage.jsonl",
+                new_record(
+                    provider_label=layer.provider.label,
+                    input_tokens=layer.gloss_input_tokens,
+                    output_tokens=layer.gloss_output_tokens,
+                    calls=layer.calls,
+                    truncated=layer.gloss_truncated,
+                ),
+            )
     return script
 
 
@@ -836,6 +894,7 @@ class Lecturer(App):
             Base,
             Extract,
             Redact,
+            EstimateGloss,
             Recite,
             Publish,
             DraftLexicon,
