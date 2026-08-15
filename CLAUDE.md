@@ -417,6 +417,34 @@ something unverifiable, that's the thing to push back on.
     `warnings.warn`s instead of failing silent, the one bail site destructive enough
     (whole-document footnote loss) to warrant a warning ahead of citation review's own
     per-document report.
+  - **Reverted-paragraph review** — the same `review.md` gained a second, independent
+    section for a gap on the glossing side: a paragraph whose model response either wasn't
+    usable or failed `_faithful` falls back to the deterministic verbatim weave
+    (`weave_utterance`) silently — and isn't written to `gloss_cache.json`, so a later
+    `redact --llm` run retries (and re-bills) it every time, forever, with no record of
+    the earlier attempt. Surfaced concretely glossing `eros_magic` for real under
+    `claude-opus-4-8`: `estimate-gloss` kept reporting a nonzero "remaining" count after a
+    complete run (33 of 295 paragraphs, ~11%) with no way to tell which ones or why.
+    `Glossator._ask` now returns `(pieces, reason)` instead of just `pieces` — `reason`
+    names which of the two failure modes happened ("no usable response from the model" vs.
+    "the model's own body text didn't reproduce the paragraph verbatim") — and
+    `_gloss_utterance` records a `RevertedParagraph` (section, footnote refs, reason, a
+    text snippet) instead of just falling back silently. Deliberately a reporting fix only,
+    not a caching-behaviour change: caching the fallback would permanently foreclose a
+    later run's chance for the model to succeed on retry, which is exactly the property
+    that makes the 33-remaining count *honest* in the first place (`estimate-gloss` already
+    correctly predicts a retry will re-bill these). `lecturer.py`'s `write_review` takes
+    both `near_misses` and `reverted` now and writes them as two `##` sections in one file
+    rather than two files, since both are the same "look here" posture. Persisted on a
+    crash too, not just success — a `ProviderError` mid-run unwinds past `redact()`
+    entirely before `near_misses` even exists (Elocutor runs after weaving), but a
+    Glossator's own `.reverted` list survives the exception unwind exactly like its usage
+    counters do (see the `_persist_gloss_usage` note above), so `_redact_phase`'s
+    `except ProviderError` branch writes `review.md` with `near_misses=[]` and whatever
+    the Glossator collected before the crash, rather than losing it. Verified with a
+    synthetic provider exercising both failure modes plus a genuinely faithful success in
+    the same run: exactly the two failures land in `reverted` with the right reasons, the
+    successful paragraph is cached and does not appear.
 - `recitation/` — speaks the script (`--speak`): `Reciter` strategy protocol, one WAV per
   section into the work dir's `audio/`. `KokoroReciter` runs Kokoro-82M via kokoro-onnx
   (pure wheels, CPU ~4× realtime; model fetched once into `~/.cache/lecturer`). Text is

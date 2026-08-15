@@ -16,7 +16,7 @@ from redaction.elocution import (
 from redaction.elocution.bibliography import parse_bibliography, sniff_style
 from redaction.elocution.citation_pairing import pair_sigla
 from redaction.estimate import estimate_gloss_cost, price_tokens, render_estimate
-from redaction.gloss import Glossator, ensure_synopsis
+from redaction.gloss import Glossator, RevertedParagraph, ensure_synopsis
 from redaction.interpret import TongueInterpreter
 from redaction.mend import SeamMender
 from redaction.providers import DEFAULT_MODELS, PROVIDERS, TAGGING_MODELS, ProviderError
@@ -36,6 +36,7 @@ __all__ = [
     "NoteDropper",
     "ProviderError",
     "Redactor",
+    "RevertedParagraph",
     "Script",
     "ScriptSection",
     "System",

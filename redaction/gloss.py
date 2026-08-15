@@ -114,6 +114,22 @@ class PendingParagraph:
     key: str
 
 
+@dataclass
+class RevertedParagraph:
+    """A paragraph the model was asked to gloss but that fell back to the
+    deterministic verbatim weave instead — not written to the cache (a
+    non-deterministic retry might still succeed), so a later ``redact --llm``
+    run will bill it again. Not a diagnosis, same abstain-over-guess posture
+    as citation review's ``NearMiss``: reported so a human can gloss it by
+    hand if it's worth the effort, not resolved here.
+    """
+
+    section_title: str
+    refs: list[str]
+    reason: str
+    context: str
+
+
 class Glossator:
     """LLM counterpart to the deterministic FootnoteWeaver."""
 
@@ -139,6 +155,7 @@ class Glossator:
         # accrued before this Glossator existed (e.g. ensure_synopsis, called
         # just before construction in lecturer.py) is never attributed here.
         self.calls = 0
+        self.reverted: list[RevertedParagraph] = []
         self._baseline_input = provider.input_tokens
         self._baseline_output = provider.output_tokens
         self._baseline_truncated = getattr(provider, "truncated", 0)
@@ -215,8 +232,16 @@ class Glossator:
         pieces = self._cache.get(key)
         if pieces is None:
             self.calls += 1
-            pieces = self._ask(section_title, utterance.text, present, context)
+            pieces, reason = self._ask(section_title, utterance.text, present, context)
             if pieces is None:
+                self.reverted.append(
+                    RevertedParagraph(
+                        section_title=section_title,
+                        refs=refs,
+                        reason=reason,
+                        context=utterance.text[:300],
+                    )
+                )
                 return weave_utterance(utterance, notes, woven)
             self._cache[key] = pieces
             self._save_cache()
@@ -231,12 +256,14 @@ class Glossator:
         paragraph: str,
         notes: dict[str, Footnote],
         context: str | None = None,
-    ) -> list[dict] | None:
+    ) -> tuple[list[dict] | None, str | None]:
         request = _request_text(section_title, paragraph, notes)
         woven = self.provider.ask(_SYSTEM, request, WovenParagraph, context=context)
-        if woven is None or not _faithful(woven, paragraph):
-            return None
-        return [piece.model_dump() for piece in woven.pieces if piece.text.strip()]
+        if woven is None:
+            return None, "no usable response from the model (truncated, or a schema mismatch)"
+        if not _faithful(woven, paragraph):
+            return None, "the model's own body text didn't reproduce the paragraph verbatim"
+        return [piece.model_dump() for piece in woven.pieces if piece.text.strip()], None
 
     def _annotated(
         self, script: Script

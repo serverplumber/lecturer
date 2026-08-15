@@ -29,6 +29,7 @@ from redaction import (
     Manner,
     NearMiss,
     ProviderError,
+    RevertedParagraph,
     Script,
     ScriptSection,
     TongueInterpreter,
@@ -195,36 +196,63 @@ def write_redactions(script: Script, directory: Path, variant: str) -> Path:
     return redactions_dir
 
 
-def write_review(near_misses: list[NearMiss], directory: Path, variant: str) -> Path | None:
-    """Write ``redactions/<variant>/review.md``: citations Elocutor couldn't convert.
+def write_review(
+    near_misses: list[NearMiss],
+    reverted: list[RevertedParagraph],
+    directory: Path,
+    variant: str,
+) -> Path | None:
+    """Write ``redactions/<variant>/review.md``: two independent "look here" lists.
 
-    Not a diagnosis — each entry is a known siglum sitting next to
-    something locator-shaped the grammar didn't accept, with enough
-    surrounding text for a human to see why and fix it by hand (in the
-    source text, or by extending the matching system in
-    ``redaction/elocution/``). Named ``.md``, not ``.txt``, so
+    Citations Elocutor couldn't convert, and paragraphs the glossator
+    reverted to verbatim weaving — each its own section, neither a
+    diagnosis. A near-miss is a known siglum sitting next to something
+    locator-shaped the grammar didn't accept; a reverted paragraph is one
+    whose model response either wasn't usable or didn't reproduce the
+    source verbatim, so it fell back to the deterministic weave instead —
+    and isn't cached, so a later ``redact --llm`` run will bill it again.
+    Either way, enough context is given for a human to act by hand, not a
+    guess at the underlying cause. Named ``.md``, not ``.txt``, so
     ``read_redactions``'s glob never mistakes it for a section. Always
     overwritten, even to "nothing to review" — never deleted, so a run
     invoked with a narrower ``systems`` set (or one that errors early)
     can't make an existing review vanish out from under someone reading it.
     """
     review_path = directory / "redactions" / variant / "review.md"
-    if not near_misses:
+    if not near_misses and not reverted:
         review_path.write_text(
-            f"# Citation review — {variant}\n\n"
-            "Nothing to review — every citation-shaped span converted.\n"
+            f"# Review — {variant}\n\n"
+            "Nothing to review — every citation-shaped span converted, and every "
+            "paragraph sent to the model was glossed successfully.\n"
         )
         return None
-    lines = [
-        f"# Citation review — {variant}\n",
-        f"{len(near_misses)} citation-shaped span(s) Elocutor didn't convert. Not a "
-        "diagnosis: a known siglum sits next to something locator-ish (a missing "
-        "space, OCR noise, a shape the system doesn't cover...) that the grammar "
-        "didn't accept. Check the context below and fix by hand if it's worth it.\n",
-    ]
-    for miss in near_misses:
-        lines.append(f'- **{miss.section}**, {miss.location} — `[{miss.system}]` "{miss.siglum}"')
-        lines.append(f"  > {miss.context}")
+    lines = [f"# Review — {variant}\n"]
+    if near_misses:
+        lines.append(f"## {len(near_misses)} citation-shaped span(s) Elocutor didn't convert\n")
+        lines.append(
+            "Not a diagnosis: a known siglum sits next to something locator-ish (a "
+            "missing space, OCR noise, a shape the system doesn't cover...) that the "
+            "grammar didn't accept. Check the context below and fix by hand if it's "
+            "worth it.\n"
+        )
+        for miss in near_misses:
+            lines.append(
+                f'- **{miss.section}**, {miss.location} — `[{miss.system}]` "{miss.siglum}"'
+            )
+            lines.append(f"  > {miss.context}")
+        lines.append("")
+    if reverted:
+        lines.append(f"## {len(reverted)} paragraph(s) reverted to verbatim weaving\n")
+        lines.append(
+            "Not cached, so a later `redact --llm` run retries (and re-bills) each of "
+            "these — worth glossing by hand instead if one keeps failing. Not a "
+            "diagnosis: the reason names what went wrong mechanically, not why.\n"
+        )
+        for paragraph in reverted:
+            refs = ", ".join(f"[^{ref}]" for ref in paragraph.refs)
+            lines.append(f"- **{paragraph.section_title}**, {refs} — {paragraph.reason}")
+            lines.append(f"  > {paragraph.context}")
+        lines.append("")
     review_path.write_text("\n".join(lines) + "\n")
     return review_path
 
@@ -843,13 +871,24 @@ def _redact_phase(app, directory: Path, extraction: Extraction, *, weaver, inter
         )
     except ProviderError as error:
         _persist_gloss_usage(app, directory, weaver)
+        # near_misses doesn't exist yet — Elocutor runs after weaving — but
+        # a Glossator's own reverted paragraphs survive the crash just like
+        # its usage counters do, and shouldn't vanish from review.md either.
+        reverted = weaver.reverted if isinstance(weaver, Glossator) else []
+        write_review(near_misses=[], reverted=reverted, directory=directory, variant=variant)
         app.log.error(f"redaction failed: {error} (finished paragraphs are cached)")
         app.exit_code = 1
         raise SystemExit(app.exit_code) from error
     redactions_dir = write_redactions(script, directory, variant)
-    review_path = write_review(near_misses, directory, variant)
+    reverted = weaver.reverted if isinstance(weaver, Glossator) else []
+    review_path = write_review(near_misses, reverted, directory, variant)
     if review_path is not None:
-        app.log.warning(f"{len(near_misses)} unconverted citation(s) — see {review_path}")
+        parts = []
+        if near_misses:
+            parts.append(f"{len(near_misses)} unconverted citation(s)")
+        if reverted:
+            parts.append(f"{len(reverted)} paragraph(s) reverted to verbatim weaving")
+        app.log.warning(f"{' and '.join(parts)} — see {review_path}")
     notes = sum(len(section.footnotes) for section in extraction.sections)
     unwoven = sum(len(section.footnotes) for section in script.sections)
     spoken_notes = (
