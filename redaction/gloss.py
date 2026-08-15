@@ -188,6 +188,18 @@ class Glossator:
     def cache_size(self) -> int:
         return len(self._cache)
 
+    def use_synopsis(self, synopsis: str) -> None:
+        """Attach a synopsis drafted after construction.
+
+        ``redact --llm``'s budget gate constructs the Glossator (to check
+        ``stale_cache_entries`` and price the estimate) before it's allowed
+        to spend anything — so a book with no synopsis.txt yet must be able
+        to get one attached only after the user has confirmed the spend.
+        Safe to call late: ``_key`` hashes paragraph inputs only, never the
+        synopsis, so nothing cached before this call is invalidated by it.
+        """
+        self._synopsis = synopsis
+
     def redact(self, script: Script) -> Script:
         return Script(sections=[self._gloss_section(section) for section in script.sections])
 

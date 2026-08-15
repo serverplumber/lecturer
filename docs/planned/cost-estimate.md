@@ -1,11 +1,19 @@
 # Spec: pre-flight cost estimate for `redact --llm`
 
-Status: implemented (`estimate-gloss` verb, `redaction/estimate.py` +
-`redaction/usage.py`) — see CLAUDE.md's Commands section for the full writeup,
-including how it was verified against real corpora. Left in place (not deleted) since
-`docs/planned/budget-confirmation.md` depends on it and links here. Written for
-handoff to a fresh session — self-contained, no need to re-read the conversation
-that produced it.
+Status: complete. Implemented as the `estimate-gloss` verb (`redaction/estimate.py` +
+`redaction/usage.py`), then hardened twice more once a real book (`eros_magic`) was
+actually glossed end to end under it: real cache-write/cache-read token tracking plus
+crash-safe usage persistence (a `ProviderError` mid-run no longer loses whatever a
+Glossator already billed), and reverted-paragraph reporting (a paragraph that falls
+back to verbatim weaving is named in `review.md`, not silently discarded). No further
+work is planned here — the estimate is as correct as it can be verified without
+spending more real money, and `gloss_usage.jsonl` now accrues real per-book ground
+truth automatically as books get glossed for real, going forward. See CLAUDE.md's
+Commands section and the "Found completing `eros_magic` for real" / "Reverted-paragraph
+review" write-ups for the full verification history. Left in place (not deleted) since
+`docs/planned/budget-confirmation.md` — a deliberately separate spec, not part of this
+one's scope — depends on it and links here. Written for handoff to a fresh session —
+self-contained, no need to re-read the conversation that produced it.
 
 ## Purpose
 
@@ -44,7 +52,7 @@ of what the remaining run will cost, so the user knows the number before spendin
   `response.usage` before the `_faithful`/parse check, not after) as part of this spec's
   groundwork, not as an afterthought.
 
-## Required groundwork (do this first, it's small)
+## Required groundwork (do this first, it's small) — done
 
 Persist real usage after a `redact --llm` run — e.g. a `gloss_usage.json` (or similar)
 alongside `gloss_cache.json` in the work dir, recording at minimum: total input tokens,
@@ -58,6 +66,20 @@ say so plainly in the estimate ("output cost cannot be estimated yet — no prio
 this book") rather than guessing from unrelated books. A global average across every book's
 usage file is a reasonable fallback if the user wants one, but treat it as clearly labeled
 as cross-book, not book-specific.
+
+**Resolved:** `gloss_usage.jsonl` (`redaction/usage.py`) ships exactly this, one JSON line
+appended per run that made a billed call — `input_tokens`, `output_tokens`,
+`cache_creation_input_tokens`, `cache_read_input_tokens`, `calls`, `truncated`,
+`provider_label`, `timestamp`. The counting fix landed (raise `max_tokens` 8000 → 24000,
+removing the truncation class outright rather than patching the counter), then went further
+than this section originally asked for: cache write/read tokens are tracked too (a real gap
+found only after glossing a real book — the counters otherwise silently omit a real part of
+the bill), and a crash mid-run no longer loses whatever was already billed and cached before
+the failure (`_persist_gloss_usage`, called from both the success and `except ProviderError`
+paths in `lecturer.py`). The cold-start message ships as specified. No cross-book fallback
+average was built — never asked for again once the per-book case worked, and cross-book
+extrapolation gets shakier the more it's leaned on (different books, different footnote
+density, different failure rates) — parked, not forgotten, if it's ever actually needed.
 
 ## Functional requirements
 

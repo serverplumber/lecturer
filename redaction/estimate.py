@@ -106,6 +106,8 @@ class Estimate:
     input_dollars: float | None = None
     output_dollars: float | None = None
     output_basis: str | None = None
+    synopsis_tokens: int = 0
+    synopsis_dollars: float | None = None
     caveats: list[str] = field(default_factory=list)
 
     @property
@@ -113,6 +115,47 @@ class Estimate:
         if self.input_dollars is None or self.output_dollars is None:
             return None
         return self.input_dollars + self.output_dollars
+
+    @property
+    def known_dollars(self) -> float | None:
+        """Every dollar figure this estimate can actually price, summed.
+
+        Unlike ``total_dollars`` (``None`` unless the *whole* cost is known),
+        this is the figure a ``--budget`` ceiling checks against: it's real
+        even on a cold-start run with no output history yet, or a book with
+        no synopsis.txt yet — both cases where the full cost can't be priced
+        but part of it can, and a ceiling should still catch what it can see
+        rather than going silent. ``None`` only when nothing at all is
+        priced (an unlisted model).
+        """
+        if self.input_dollars is None:
+            return None
+        return self.input_dollars + (self.synopsis_dollars or 0.0) + (self.output_dollars or 0.0)
+
+
+def check_budget(estimate: Estimate, budget: float) -> str | None:
+    """``None`` if ``estimate`` fits ``budget`` (or can't be checked at all).
+
+    A refusal message otherwise, for the caller to print and abort on
+    without spending anything — see docs/planned/budget-confirmation.md.
+    Deliberately checks only the *known* portion of the cost
+    (``Estimate.known_dollars``): refusing outright the moment any priced
+    part alone exceeds the ceiling, but never refusing on an unpriced
+    unknown (e.g. output cost on a book's first-ever ``--llm`` run) — that
+    case falls through to the interactive confirmation instead, so
+    ``--budget`` stays useful on the very run where a ceiling is most
+    wanted rather than refusing every cold start unconditionally.
+    """
+    known = estimate.known_dollars
+    if known is None or known <= budget:
+        return None
+    if estimate.total_dollars is None:
+        return (
+            f"the known portion alone (input plus synopsis, if any) is ${known:.2f} — "
+            f"already ${known - budget:.2f} over your ${budget:.2f} budget, before output "
+            "cost is even counted."
+        )
+    return f"the estimate is ${known:.2f}, ${known - budget:.2f} over your ${budget:.2f} budget."
 
 
 def estimate_gloss_cost(
@@ -287,6 +330,8 @@ def estimate_gloss_cost(
         input_dollars=input_dollars,
         output_dollars=output_dollars,
         output_basis=output_basis,
+        synopsis_tokens=synopsis_tokens,
+        synopsis_dollars=synopsis_dollars,
         caveats=caveats,
     )
 
@@ -294,6 +339,29 @@ def estimate_gloss_cost(
 def render_estimate(estimate: Estimate) -> str:
     """Plain prose, not a table — read aloud correctly by a screen reader."""
     if not estimate.remaining_paragraphs:
+        if estimate.synopsis_tokens:
+            # Every annotated paragraph is cached, but this book has no
+            # synopsis.txt yet — redact --llm still makes one real billed
+            # call to draft it, so "spend nothing" would be false here. A
+            # caller gating a real spend on this prose (redact --llm's
+            # confirmation prompt) needs that spend named, not hidden behind
+            # a message written for a paragraph-only run.
+            sentence = (
+                "No annotated paragraph is left to gloss — every one is already cached. "
+                "This book has no synopsis.txt yet, though, so redact --llm would still "
+                "make one real billed call to draft it"
+            )
+            if estimate.synopsis_dollars is not None:
+                sentence += (
+                    f", around ${estimate.synopsis_dollars:.2f} "
+                    f"({estimate.synopsis_tokens} input tokens)."
+                )
+            else:
+                sentence += (
+                    f" ({estimate.synopsis_tokens} input tokens, no dollar figure on "
+                    f"file for {estimate.model})."
+                )
+            return sentence
         return (
             "Nothing left to gloss — every annotated paragraph in this book is already "
             "cached, so redact --llm would spend nothing on a run right now."

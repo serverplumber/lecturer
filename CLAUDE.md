@@ -593,6 +593,38 @@ Everything routine is in the `justfile`:
   reconstruct usage from a truncated call after the fact, which would mean reaching
   into `anthropic.lib._parse`'s private internals to get at a `Message.usage` that
   never survives the SDK's own `ValidationError` unwind.
+- **`--budget`/confirmation gate on `redact --llm`** (`docs/planned/budget-confirmation.md`):
+  never let `--llm` spend anything silently. `Redact._default` now computes the estimate,
+  prints it, and requires either an interactive `y` or `--yes` before any billed call; an
+  optional `--budget DOLLARS` refuses outright — never bypassed by `--yes`, the two flags stay
+  orthogonal — the moment the estimate's *known* portion alone (`Estimate.known_dollars`, a
+  new property summing whatever's actually priced: input, synopsis, output) exceeds it, but
+  falls through to the human on a cold-start book with unknown output cost rather than
+  refusing every first run unconditionally. Building this surfaced that `Redact._default` was
+  calling `ensure_synopsis` — a real billed call — before the `Glossator` even existed, let
+  alone before any estimate could print; fixed by reading `synopsis.txt` off disk the way
+  `EstimateGloss._default` already did, gating first, then drafting for real only after
+  confirmation and attaching it post-construction via a new `Glossator.use_synopsis` (safe
+  late — `_key` hashes paragraph inputs only). Also surfaced and fixed: `render_estimate`'s
+  "nothing left to gloss" claimed `redact --llm` "would spend nothing" even when a pending
+  synopsis draft meant it wouldn't — harmless as a pure report, false once a gate started
+  reading that prose to decide what to tell a human; and `--provider openai`/local models,
+  which have no free `count_tokens` equivalent, so `estimate_gloss_cost` can't run at all —
+  the gate still runs via `_confirm_unpriced_spend` (a real remaining-paragraph count from
+  `Glossator.pending_paragraphs`, no pricing), but `--budget` now errors out explicitly on
+  that path rather than silently not applying, since a ceiling that silently checks nothing
+  is worse than no ceiling. Verified for real via `ant auth login` (no `ANTHROPIC_API_KEY` in
+  this session): `redact --llm --provider openai` against `eros_magic`'s real 262-entry
+  `gloss_cache.json` correctly flagged every entry stale and refused non-interactively;
+  `--budget 1` against a real $5.96 estimate refused with the real numbers, unchanged by
+  adding `--yes`; a real pty run showed the real prompt and honoured a typed `n`, exiting 1
+  with nothing spent. Then a real confirmed run — `redact --llm --yes --budget 10` against
+  `ideas_and_ideals` (Yates 1984, untouched before this) — drafted its synopsis for real only
+  after the gate passed, billed 91 paragraphs, correctly reverted 12 to verbatim on the
+  faithfulness guard (`review.md`), left `gloss_cache.json` at exactly 79 = 91 − 12 entries,
+  and cost $3.45 total — after which a follow-up `estimate-gloss` priced the remaining 12 from
+  that run's own real `gloss_usage.jsonl` history instead of cold-starting, confirming the
+  full loop this spec and `estimate-gloss` together describe holds end to end.
 - **Edge case, surfaced switching this project's own default model**: `gloss_cache.json`
   is scoped per model, not per paragraph — `Glossator._key` hashes `provider.label`
   (which encodes the model name) alongside the paragraph and its notes, so bumping
