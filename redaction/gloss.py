@@ -142,6 +142,8 @@ class Glossator:
         self._baseline_input = provider.input_tokens
         self._baseline_output = provider.output_tokens
         self._baseline_truncated = getattr(provider, "truncated", 0)
+        self._baseline_cache_creation = getattr(provider, "cache_creation_input_tokens", 0)
+        self._baseline_cache_read = getattr(provider, "cache_read_input_tokens", 0)
 
     @property
     def gloss_input_tokens(self) -> int:
@@ -154,6 +156,16 @@ class Glossator:
     @property
     def gloss_truncated(self) -> int:
         return getattr(self.provider, "truncated", 0) - self._baseline_truncated
+
+    @property
+    def gloss_cache_creation_tokens(self) -> int:
+        return (
+            getattr(self.provider, "cache_creation_input_tokens", 0) - self._baseline_cache_creation
+        )
+
+    @property
+    def gloss_cache_read_tokens(self) -> int:
+        return getattr(self.provider, "cache_read_input_tokens", 0) - self._baseline_cache_read
 
     @property
     def cache_size(self) -> int:

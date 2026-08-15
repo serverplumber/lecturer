@@ -586,6 +586,48 @@ Everything routine is in the `justfile`:
   `recite`/`publish`-only, for choosing which sections get *audio*) — there's currently
   no way to gloss only part of a book to sidestep this; the cache is already
   paragraph-cheap on a re-run (skips everything unaffected), the warning is what's new.
+- **Found completing `eros_magic` for real, glossing under `claude-opus-4-8`**:
+  - `AnthropicProvider.ask` used `messages.parse` (non-streaming); the SDK refuses that
+    outright once `max_tokens` crosses ~21333 — `3600s * max_tokens / 128000 > 600s`, its
+    own fixed heuristic, unconditional on how long a call actually takes — and this
+    session's earlier `max_tokens` raise (8000 → 24000, for `count_tokens`-honest usage
+    counters) crosses it. Nothing in prior testing (`count_input_tokens`, a free endpoint
+    with no such guard) made a real generation call, so this only surfaced glossing a real
+    chapter. Fixed by switching to `messages.stream()` + `get_final_message()` — same
+    `ParsedMessage` return shape, same `.usage`/`.parsed_output`, verified against a real
+    minimal call before re-running.
+  - The SDK's own default `max_retries` (2, for 429/5xx with backoff) wasn't enough to
+    ride out two separate transient `Internal server error` 500s mid-run — each required a
+    manual re-launch. `AnthropicProvider`'s client now sets `max_retries=6`: a long book is
+    dozens of sequential calls, so more headroom costs nothing on the common case.
+  - `AnthropicProvider` never tracked `response.usage.cache_creation_input_tokens` /
+    `cache_read_input_tokens` (both `Optional[int]`, `None` when unused) — only
+    `input_tokens`/`output_tokens`. Since a real run's cache-write/read charges are a real
+    part of the bill (1.25x/0.1x of input price), any "actual cost" built from the old
+    counters silently understated it — surfaced asking how the pre-run estimate compared
+    to what `eros_magic` actually cost, and the honest answer was "can't tell you, the real
+    number was never fully captured." Added `AnthropicProvider.cache_creation_input_tokens`
+    /`.cache_read_input_tokens`, `Glossator.gloss_cache_creation_tokens`/
+    `.gloss_cache_read_tokens` (baselined the same way as the other `gloss_*` counters),
+    and matching fields on `usage.UsageRecord` — defaulted to `0` so the one real
+    `gloss_usage.jsonl` record already on disk (`eros_magic`, written before this fix)
+    still parses via `UsageRecord(**json.loads(line))` rather than getting silently
+    dropped by `load_usage`'s own `except (JSONDecodeError, TypeError)`.
+    `redaction/estimate.py` gained a public `price_tokens(model, ...)` —
+    the one pricing formula, shared by the module's own forward-looking estimate and by
+    `lecturer.py`'s new post-run real-cost log line, so the two can't drift apart the way
+    they just had.
+  - A `ProviderError` mid-run (either of the two 500s above) unwinds past
+    `_redact_phase`'s `append_usage(...)` call entirely — real billed calls a crashed run
+    already made (and already cached, so not re-billed) were simply never recorded in
+    `gloss_usage.jsonl`, silently shrinking the sample a later `estimate-gloss` extrapolates
+    from. `_redact_phase` extracted a `_persist_gloss_usage(app, directory, weaver)` helper,
+    called from both the success path and the `except ProviderError` branch — a Glossator's
+    own counters survive the exception unwind (the object itself isn't destroyed), so
+    whatever it billed before the failure is still readable and gets persisted either way.
+    Verified with a synthetic provider whose second call raises mid-script: the first
+    call's real tokens (cache tokens included) land in `gloss_usage.jsonl` even though the
+    overall `redact()` call raises.
 
 Use `uv` for all dependency management (`uv add`, `uv add --dev`), never pip. direnv
 activates the venv; `.envrc` runs `uv sync` on entry.

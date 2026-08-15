@@ -24,10 +24,27 @@ class UsageRecord:
     output_tokens: int
     calls: int
     truncated: int
+    # Defaulted, not required: a record written before these were tracked
+    # (real ones already exist on disk) must still parse via UsageRecord(
+    # **json.loads(line)) rather than raise and get silently dropped by
+    # load_usage's own except clause — losing real calls/output_tokens data
+    # over a field that was simply never captured yet. 0 slightly understates
+    # an old record's real cost (cache writes/reads did happen, just weren't
+    # counted) but never corrupts the output-token average load_usage feeds
+    # redaction/estimate.py, which never reads these two fields.
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
 
 
 def new_record(
-    *, provider_label: str, input_tokens: int, output_tokens: int, calls: int, truncated: int
+    *,
+    provider_label: str,
+    input_tokens: int,
+    output_tokens: int,
+    calls: int,
+    truncated: int,
+    cache_creation_input_tokens: int = 0,
+    cache_read_input_tokens: int = 0,
 ) -> UsageRecord:
     return UsageRecord(
         timestamp=datetime.now(UTC).isoformat(),
@@ -36,6 +53,8 @@ def new_record(
         output_tokens=output_tokens,
         calls=calls,
         truncated=truncated,
+        cache_creation_input_tokens=cache_creation_input_tokens,
+        cache_read_input_tokens=cache_read_input_tokens,
     )
 
 

@@ -35,6 +35,7 @@ from redaction import (
     Utterance,
     ensure_synopsis,
     estimate_gloss_cost,
+    price_tokens,
     redact,
     render_estimate,
 )
@@ -787,6 +788,44 @@ def _extract_phase(app, directory: Path, document: Path | None) -> Extraction | 
     return extraction
 
 
+def _persist_gloss_usage(app, directory: Path, weaver) -> None:
+    """Persist a Glossator's real usage — called on success *and* on a crash.
+
+    A ``ProviderError`` mid-run doesn't unwind the Glossator's own counters;
+    whatever it billed before the failure (real money, real cache entries
+    already written) must not vanish from ``gloss_usage.jsonl`` just because
+    the surrounding ``redact()`` pipeline didn't finish — a later
+    ``estimate-gloss`` would otherwise never see it. No-op for anything that
+    isn't a ``Glossator``, or one that never reached a billed call.
+    """
+    if not isinstance(weaver, Glossator) or not weaver.calls:
+        return
+    record = new_record(
+        provider_label=weaver.provider.label,
+        input_tokens=weaver.gloss_input_tokens,
+        output_tokens=weaver.gloss_output_tokens,
+        cache_creation_input_tokens=weaver.gloss_cache_creation_tokens,
+        cache_read_input_tokens=weaver.gloss_cache_read_tokens,
+        calls=weaver.calls,
+        truncated=weaver.gloss_truncated,
+    )
+    append_usage(directory / "gloss_usage.jsonl", record)
+    dollars = price_tokens(
+        weaver.provider.model,
+        input_tokens=record.input_tokens,
+        cache_creation_tokens=record.cache_creation_input_tokens,
+        cache_read_tokens=record.cache_read_input_tokens,
+        output_tokens=record.output_tokens,
+    )
+    cost = f"${dollars:.2f}" if dollars is not None else "no pricing on file"
+    app.log.info(
+        f"glossator billed {record.calls} call(s) this run: {record.input_tokens} input + "
+        f"{record.cache_creation_input_tokens} cache-write + {record.cache_read_input_tokens} "
+        f"cache-read + {record.output_tokens} output tokens on {record.provider_label} "
+        f"— real cost: {cost}"
+    )
+
+
 def _redact_phase(app, directory: Path, extraction: Extraction, *, weaver, interpreter) -> Script:
     if isinstance(weaver, Glossator):
         variant = "glossed"
@@ -803,6 +842,7 @@ def _redact_phase(app, directory: Path, extraction: Extraction, *, weaver, inter
             elocution_dir=_elocution_dir(app),
         )
     except ProviderError as error:
+        _persist_gloss_usage(app, directory, weaver)
         app.log.error(f"redaction failed: {error} (finished paragraphs are cached)")
         app.exit_code = 1
         raise SystemExit(app.exit_code) from error
@@ -828,30 +868,14 @@ def _redact_phase(app, directory: Path, extraction: Extraction, *, weaver, inter
         f"redacted into {redactions_dir}: {spoken_notes}"
         + (f", other tongues: {spoken}" if tongues else "")
     )
-    for name, layer in (("glossator", weaver), ("interpreter", interpreter)):
-        if isinstance(layer, Glossator | TongueInterpreter):
-            provider = layer.provider
-            if provider.input_tokens or provider.output_tokens:
-                app.log.info(
-                    f"{name} used {provider.input_tokens} input + "
-                    f"{provider.output_tokens} output tokens on {provider.label}"
-                )
-        if isinstance(layer, Glossator) and layer.calls:
-            # Excludes whatever ensure_synopsis spent on this same provider
-            # instance before the Glossator existed (gloss_input_tokens/
-            # gloss_output_tokens baseline against the provider's counters at
-            # construction time) — a per-paragraph average built from this
-            # record would otherwise be skewed by one large one-off call.
-            append_usage(
-                directory / "gloss_usage.jsonl",
-                new_record(
-                    provider_label=layer.provider.label,
-                    input_tokens=layer.gloss_input_tokens,
-                    output_tokens=layer.gloss_output_tokens,
-                    calls=layer.calls,
-                    truncated=layer.gloss_truncated,
-                ),
+    if isinstance(interpreter, TongueInterpreter):
+        provider = interpreter.provider
+        if provider.input_tokens or provider.output_tokens:
+            app.log.info(
+                f"interpreter used {provider.input_tokens} input + "
+                f"{provider.output_tokens} output tokens on {provider.label}"
             )
+    _persist_gloss_usage(app, directory, weaver)
     return script
 
 

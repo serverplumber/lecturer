@@ -64,6 +64,14 @@ class AnthropicProvider:
         self.model = model
         self.input_tokens = 0
         self.output_tokens = 0
+        # Separate from input_tokens: Anthropic's own usage object reports
+        # cache writes/reads as distinct fields, billed at different
+        # multipliers (~1.25x / ~0.1x of base input price) — folding them
+        # into input_tokens would misprice any real-cost report built from
+        # these counters. See redaction/estimate.py's own cache-write/read
+        # modeling for the forward-looking (pre-call) counterpart of this.
+        self.cache_creation_input_tokens = 0
+        self.cache_read_input_tokens = 0
         # A call whose response truncates mid-JSON (see the ValidationError
         # catch in ask()) is still billed by Anthropic in full, but its usage
         # never reaches input_tokens/output_tokens above — there is nothing
@@ -143,6 +151,8 @@ class AnthropicProvider:
             return None
         self.input_tokens += response.usage.input_tokens
         self.output_tokens += response.usage.output_tokens
+        self.cache_creation_input_tokens += response.usage.cache_creation_input_tokens or 0
+        self.cache_read_input_tokens += response.usage.cache_read_input_tokens or 0
         return response.parsed_output
 
     def count_input_tokens(

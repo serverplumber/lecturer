@@ -59,6 +59,35 @@ _DEFAULT_CACHE_MINIMUM = 1024
 _SYNOPSIS_CHARS = 600_000
 
 
+def price_tokens(
+    model: str,
+    *,
+    input_tokens: int = 0,
+    cache_creation_tokens: int = 0,
+    cache_read_tokens: int = 0,
+    output_tokens: int = 0,
+) -> float | None:
+    """Real dollar cost for a set of token counts under ``model``.
+
+    ``None`` when ``model`` isn't in ``_PRICING`` — the same abstain-over-
+    guess posture the rest of this module takes, rather than a wrong number.
+    One formula, used both by this module's own forward-looking estimate and
+    by ``lecturer.py``'s post-run real-cost report (built from
+    ``AnthropicProvider``'s real usage counters, cache tokens included) —
+    keeping the two from drifting apart the way the estimate's own input
+    figure and a run's real reported cost once did (see CLAUDE.md).
+    """
+    price_in, price_out = _PRICING.get(model, (None, None))
+    if price_in is None:
+        return None
+    return (
+        input_tokens * price_in
+        + cache_creation_tokens * price_in * _CACHE_WRITE_MULTIPLIER
+        + cache_read_tokens * price_in * _CACHE_READ_MULTIPLIER
+        + output_tokens * price_out
+    ) / 1_000_000
+
+
 @dataclass
 class ChapterEstimate:
     title: str
@@ -156,8 +185,8 @@ def estimate_gloss_cost(
             "re-writes the prefix instead, at the higher write price rather than the read price."
         )
 
-    price_in, price_out = _PRICING.get(provider.model, (None, None))
-    if price_in is None:
+    priced = provider.model in _PRICING
+    if not priced:
         caveats.append(
             f"no pricing on file for model {provider.model!r} — reporting token counts only."
         )
@@ -183,16 +212,15 @@ def estimate_gloss_cost(
 
     total_input_tokens = base_tokens + write_tokens + read_tokens + synopsis_tokens
 
-    input_dollars = None
-    synopsis_dollars = None
-    if price_in is not None:
-        input_dollars = (
-            base_tokens * price_in
-            + write_tokens * price_in * _CACHE_WRITE_MULTIPLIER
-            + read_tokens * price_in * _CACHE_READ_MULTIPLIER
-        ) / 1_000_000
-        if synopsis_tokens:
-            synopsis_dollars = synopsis_tokens * price_in / 1_000_000
+    input_dollars = price_tokens(
+        provider.model,
+        input_tokens=base_tokens,
+        cache_creation_tokens=write_tokens,
+        cache_read_tokens=read_tokens,
+    )
+    synopsis_dollars = (
+        price_tokens(provider.model, input_tokens=synopsis_tokens) if synopsis_tokens else None
+    )
 
     if synopsis_tokens:
         if synopsis_dollars is not None:
@@ -232,8 +260,7 @@ def estimate_gloss_cost(
                 f"{billed_calls} real call{'s' if billed_calls != 1 else ''} "
                 f"on {provider.label}, from this book's own history"
             )
-            if price_out is not None:
-                output_dollars = average_output * remaining * price_out / 1_000_000
+            output_dollars = price_tokens(provider.model, output_tokens=average_output * remaining)
             if total_truncated:
                 caveats.append(
                     f"{total_truncated} of {total_calls} historical call(s) on {provider.label} "
