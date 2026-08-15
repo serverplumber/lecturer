@@ -74,7 +74,14 @@ class AnthropicProvider:
         self.truncated = 0
         self._model = model
         self._effort = effort
-        self._client = anthropic.Anthropic(**({"base_url": base_url} if base_url else {}))
+        # The SDK's own default (2) retries 429/5xx with backoff but wasn't
+        # enough to ride out a real run of transient 500s this session — a
+        # long book means dozens of sequential calls, so raising it here
+        # costs nothing on the common case and saves a manual re-run on a bad
+        # patch of Anthropic's infra.
+        self._client = anthropic.Anthropic(
+            max_retries=6, **({"base_url": base_url} if base_url else {})
+        )
         # Optimistic until proven otherwise: adaptive thinking isn't available
         # on every model (Haiku 4.5 rejects it outright with a 400), and which
         # models support it isn't something to hardcode a list for — it's
@@ -96,19 +103,23 @@ class AnthropicProvider:
         if self._thinking:
             extra["thinking"] = {"type": "adaptive"}
         try:
-            response = self._client.messages.parse(
+            # Streamed, not .parse(): the SDK refuses a non-streaming call
+            # outright once max_tokens crosses ~21333 (its own heuristic —
+            # 3600s * max_tokens / 128000 > the 600s non-streaming default —
+            # unconditional, not based on how long the call actually takes),
+            # and 24000 crosses that. Found for real: raising max_tokens from
+            # 8000 (see the ValidationError catch below for why) worked in
+            # every test that only counted tokens, then crashed outright on
+            # the first genuine long-context glossing call this session.
+            with self._client.messages.stream(
                 model=self._model,
-                # Shared between adaptive thinking and the visible response; billed
-                # by tokens actually generated, not this ceiling, so raising it is
-                # free on paragraphs that don't need it — 8000 was tight enough that
-                # thinking plus a long digression could truncate the JSON mid-parse
-                # (see the ValidationError catch below), a real crash this session.
                 max_tokens=24000,
                 system=prompt,
                 messages=[{"role": "user", "content": request}],
                 output_format=schema,
                 **extra,
-            )
+            ) as stream:
+                response = stream.get_final_message()
         except (TypeError, anthropic.AuthenticationError) as error:
             # The SDK raises a bare TypeError when no credential source exists.
             if isinstance(error, TypeError) and "authentication" not in str(error):
