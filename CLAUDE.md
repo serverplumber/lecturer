@@ -20,7 +20,24 @@ something unverifiable, that's the thing to push back on.
 
 ## Layout
 
-- `lecturer.py` — the cement-based CLI: sets up the work directory and runs extraction.
+- `lecturer/` — the cement-based CLI, split one file per verb (originally one 1113-line
+  `lecturer.py`; broken up for launch since one file everybody touches for any command
+  makes collaboration difficult, even though it was simple enough to manage solo).
+  Mirrors the base.py-plus-feature-files-plus-`__init__.py` convention `extraction/`,
+  `redaction/`, and `recitation/` already use: `workdir.py` (work-dir setup and naming —
+  `prepare_workdir`, `slugify`, `section_stem`, the document/work-dir identity guard
+  `_reconcile`), `io.py` (the `redactions/<variant>/` file-tree read/write format shared
+  by every phase — `write_sections`, `write_redactions`, `write_review`,
+  `read_redactions`), `phases.py` (the four pipeline phases — `_extract_phase`,
+  `_redact_phase`, `_recite_phase`, `_publish_phase` — plus verb-shared glue like
+  `_ensure_redactions`, `_provider`, `_elocution_dir`; used by more than one controller,
+  which is why they live apart from any single verb's file), `arguments.py` (CLI argument
+  tuples shared across more than one verb's `Meta.arguments`), `controllers/` (one cement
+  `Controller` per verb: `base`, `extract`, `redact`, `estimate`, `recite`, `publish`,
+  `lexicon`, and `classical` for both `draft-classical`/`promote-classical` together,
+  since they're two ends of the same tier-1/tier-2 relationship), and `main.py` (the
+  `App` class and `main()`). No behaviour changed in the split — every function kept its
+  body, only import lines and file boundaries moved.
 - `extraction/` — strategy-pattern extractors (epub, pdf) producing `Section`s of running
   text with `[^ref]`-anchored footnotes. `pdf.py`'s `ref` is `p{page}-n{number}` — `page`
   reads the PDF's own embedded page label (`Page.get_label()`, from its `/PageLabels`,

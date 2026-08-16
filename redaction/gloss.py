@@ -153,7 +153,8 @@ class Glossator:
         # cost nothing more. Token counters baseline against the provider's
         # own running totals at construction time, so usage the provider
         # accrued before this Glossator existed (e.g. ensure_synopsis, called
-        # just before construction in lecturer.py) is never attributed here.
+        # just before construction in lecturer.controllers.redact) is never
+        # attributed here.
         self.calls = 0
         self.reverted: list[RevertedParagraph] = []
         self._baseline_input = provider.input_tokens

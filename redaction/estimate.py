@@ -3,7 +3,7 @@
 Computes what the remaining glossing work would cost without spending
 anything: input tokens come from ``count_tokens`` (a free endpoint), output
 tokens are extrapolated from this book's own persisted call history
-(``gloss_usage.jsonl``, written by ``lecturer.py`` after a real run). Scoped
+(``gloss_usage.jsonl``, written by ``lecturer.phases`` after a real run). Scoped
 to the Anthropic provider for v1 — OpenAI has different pricing and no
 identically-named free token-counting endpoint (non-goal, tracked as future
 work in the spec).
@@ -72,7 +72,7 @@ def price_tokens(
     ``None`` when ``model`` isn't in ``_PRICING`` — the same abstain-over-
     guess posture the rest of this module takes, rather than a wrong number.
     One formula, used both by this module's own forward-looking estimate and
-    by ``lecturer.py``'s post-run real-cost report (built from
+    by ``lecturer.phases``' post-run real-cost report (built from
     ``AnthropicProvider``'s real usage counters, cache tokens included) —
     keeping the two from drifting apart the way the estimate's own input
     figure and a run's real reported cost once did (see CLAUDE.md).

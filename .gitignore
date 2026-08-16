@@ -17,7 +17,7 @@ wheels/
 texts/
 
 # Repo-local dev override of ~/.config/lecturer/lecturer.conf (see
-# lecturer.py's _DEV_CONFIG) — personal to this checkout, never committed.
+# lecturer/main.py's _DEV_CONFIG) — personal to this checkout, never committed.
 /lecturer.conf
 
 # Working directories created by lecturer contain their own
