@@ -1,7 +1,35 @@
 # Spec: append-only JSONL for the gloss cache
 
-Status: not started. Independent of the other two `docs/planned/` specs — no dependency
-either way. Written for handoff to a fresh session — self-contained.
+Status: **closed, not implemented.** Independent of the other two `docs/planned/` specs —
+no dependency either way.
+
+## Why closed
+
+The "Purpose" section below conflates two problems this spec's own crash surfaced, and only
+one of them is real:
+
+- **Corruption on interrupt** — already fully fixed, separately from this spec. `_save_cache`
+  (`redaction/gloss.py:351-354`) writes to a `.part` file and renames it over the real one,
+  which is atomic on POSIX: a crash mid-write leaves the old `gloss_cache.json` untouched.
+  There's no window where the file itself is corrupt today.
+- **O(n) rewrite cost** — real, but not at a scale that matters here. Measured against the
+  three actual live caches at the time this was closed: `eros_magic` (262 entries, 282KB)
+  took 1.5ms to `json.dumps`; `temple_gates` (81 entries, 150KB) 0.7ms; `ideas_and_ideals`
+  (79 entries, 87KB) 0.3ms. Each save happens once per paragraph, after a network round-trip
+  to Anthropic that takes seconds — the rewrite is three orders of magnitude cheaper than the
+  call that triggers it, and stays negligible even at 10x today's largest cache.
+
+Against that, JSONL would cost real complexity: a migration that must not silently drop
+already-paid-for entries (see below), a new truncated-last-line failure mode with no
+equivalent today, and worse skim-ability than pretty-printed JSON for a project that values
+hand-editable artefacts. Not worth it for a rewrite cost that isn't actually a problem.
+
+Revisit only if a real cache someday grows large enough that `json.dumps` shows up in a
+profile — it currently doesn't, by two orders of magnitude.
+
+---
+
+*Original spec preserved below for reference.*
 
 ## Purpose
 
