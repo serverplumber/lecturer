@@ -22,3 +22,6 @@ texts/
 
 # Working directories created by lecturer contain their own
 # self-ignoring .gitignore, so they need no entries here.
+ 
+# Jetbrains
+.idea/
