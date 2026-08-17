@@ -13,15 +13,23 @@ wheels/
 # direnv
 .direnv/
 
-# Source texts (copyrighted material, large binaries)
-texts/
+# Source texts (copyrighted material, large binaries).
+#
+# No trailing slash: as of 2026-08-16 these are SYMLINKS, not directories, and
+# `texts/` matches directories only — the symlink would show up untracked.
+# The real files now live outside the repo, at:
+#   texts         -> ~/Books/lecturer
+#   working_texts -> ~/Documents/lecturer_working
+# They were moved because git-ignored is not the same as regenerable: an
+# offsite backup that honours .gitignore was skipping 4.4 GiB of scanned books
+# and recorded audio that exists nowhere else. Ignored data belongs outside a
+# repo, not inside one behind an ignore rule.
+texts
+working_texts
 
 # Repo-local dev override of ~/.config/lecturer/lecturer.conf (see
 # lecturer/main.py's _DEV_CONFIG) — personal to this checkout, never committed.
 /lecturer.conf
 
-# Working directories created by lecturer contain their own
-# self-ignoring .gitignore, so they need no entries here.
- 
 # Jetbrains
 .idea/
