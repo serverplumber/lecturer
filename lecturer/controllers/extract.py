@@ -12,7 +12,7 @@ class Extract(Controller):
         label = "extract"
         stacked_on = "base"
         stacked_type = "nested"
-        help = "set up the work dir and extract sections/ from the document"
+        help = "1. set up the work dir and extract sections/ from the document"
         description = "Set up the working directory and extract the document into sections/."
         arguments = [
             _OUTPUT_ARGUMENT,

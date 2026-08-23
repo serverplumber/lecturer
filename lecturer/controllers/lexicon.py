@@ -11,7 +11,7 @@ class DraftLexicon(Controller):
         label = "draft-lexicon"
         stacked_on = "base"
         stacked_type = "nested"
-        help = "draft lexicon.json pronunciation entries, then stop for review"
+        help = "(optional) draft lexicon.json pronunciation entries, then stop for review"
         description = (
             "Sweep the redacted script for pronunciation risks with a cheap "
             "model and merge draft entries into the work dir's lexicon.json — "

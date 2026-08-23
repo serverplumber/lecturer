@@ -17,9 +17,19 @@ class Base(Controller):
     class Meta:
         label = "base"
         description = (
-            "Turn monographs into audiobooks. Bare `lecturer -o DIR` runs the "
-            "whole chain to publish with default settings; the verbs run one "
-            "phase each, reading the previous phase's files from the work dir."
+            "Turn monographs into audiobooks. The pipeline is four ordered steps, "
+            "numbered 1-4 below (extract -> redact -> recite -> publish), each "
+            "reading the previous step's files from the work dir; bare `lecturer "
+            "-o DIR` runs all four with default settings. The other verbs "
+            "(marked optional below) are utilities you can run alongside the "
+            "pipeline where useful, not additional required steps."
+        )
+        epilog = (
+            "Typical order: extract, redact [--llm], recite, publish. "
+            "estimate-gloss checks redact --llm's cost before you spend anything "
+            "on it. draft-lexicon and draft-classical/promote-classical draft and "
+            "graduate pronunciation/citation data you can review by hand; run "
+            "them after redact, whenever their own --help says they fit."
         )
         arguments = [_OUTPUT_ARGUMENT]
 

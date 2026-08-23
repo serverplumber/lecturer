@@ -10,7 +10,7 @@ class Publish(Controller):
         label = "publish"
         stacked_on = "base"
         stacked_type = "nested"
-        help = "bind audio/<variant>/ into Opus plus an M3U playlist"
+        help = "4. bind audio/<variant>/ into Opus plus an M3U playlist"
         description = (
             "Convert recited WAVs to Opus (~10x smaller) and write a playlist "
             "with section titles and durations, in reading order."

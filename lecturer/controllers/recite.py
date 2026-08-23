@@ -10,7 +10,7 @@ class Recite(Controller):
         label = "recite"
         stacked_on = "base"
         stacked_type = "nested"
-        help = "speak redactions/<variant>/ into audio/<variant>/"
+        help = "3. speak redactions/<variant>/ into audio/<variant>/"
         description = (
             "Synthesise the redacted script into one WAV per section with Kokoro. "
             "Unchanged sections (by content signature) are kept; apparatus "

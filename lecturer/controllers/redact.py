@@ -26,7 +26,7 @@ class Redact(Controller):
         label = "redact"
         stacked_on = "base"
         stacked_type = "nested"
-        help = "rework the extraction into redactions/<variant>/"
+        help = "2. rework the extraction into redactions/<variant>/"
         description = (
             "Rework the extracted text, layer by layer, into a spoken script. "
             "The weaver decides the variant: notes dropped (book, the default), "

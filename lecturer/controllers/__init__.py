@@ -9,19 +9,24 @@ from lecturer.controllers.publish import Publish
 from lecturer.controllers.recite import Recite
 from lecturer.controllers.redact import Redact
 
-# Order matters here: cement uses it for controller registration/help
-# ordering, so this mirrors the verb sequence of the pipeline itself
-# rather than being alphabetized.
+# Order matters here, but counterintuitively backwards: cement's
+# ArgparseController._setup_controllers resolves siblings nested on the same
+# parent (all of these are stacked_on "base") by insert(0, ...)-ing each into
+# its resolved list in registration order, which reverses that order in the
+# final --help listing. So this list is written in the *reverse* of the
+# pipeline sequence it's meant to display — verified against `lecturer --help`
+# after each reordering, since the effect isn't otherwise obvious from
+# reading cement's source alone.
 HANDLERS = [
     Base,
-    Extract,
-    Redact,
-    EstimateGloss,
-    Recite,
-    Publish,
-    DraftLexicon,
-    DraftClassical,
     PromoteClassical,
+    DraftClassical,
+    DraftLexicon,
+    Publish,
+    Recite,
+    EstimateGloss,
+    Redact,
+    Extract,
 ]
 
 __all__ = [

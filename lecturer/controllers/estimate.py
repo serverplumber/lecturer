@@ -11,7 +11,7 @@ class EstimateGloss(Controller):
         label = "estimate-gloss"
         stacked_on = "base"
         stacked_type = "nested"
-        help = "print a real cost estimate for redact --llm, without spending anything"
+        help = "(optional) print a real cost estimate for redact --llm, without spending anything"
         description = (
             "Compute and print what the remaining redact --llm work would cost, using "
             "count_tokens (free) for input and this book's own gloss_usage.jsonl call "
