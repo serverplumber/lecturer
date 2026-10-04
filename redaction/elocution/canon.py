@@ -54,6 +54,7 @@ import tomllib
 from pathlib import Path
 
 import tomlkit
+from tomlkit.items import InlineTable, Table
 
 
 def tier1_path(elocution_dir: Path, system: str) -> Path:
@@ -109,7 +110,7 @@ def merged_sigla(
     }
 
 
-def _resolved_entry(entry: dict) -> tomlkit.items.InlineTable:
+def _resolved_entry(entry: dict) -> InlineTable:
     """A resolved entry's fields as a flat inline table — always short (``spoken``, ``count``)."""
     table = tomlkit.inline_table()
     for key, value in entry.items():
@@ -118,7 +119,7 @@ def _resolved_entry(entry: dict) -> tomlkit.items.InlineTable:
     return table
 
 
-def _stub_entry(entry: dict) -> tomlkit.items.Table:
+def _stub_entry(entry: dict) -> Table:
     """A stub's fields as a real ``[siglum]`` table, not one crammed inline line.
 
     A dict field whose values are all scalars (``candidates``: author ->

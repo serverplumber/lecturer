@@ -34,7 +34,8 @@ def pull_endnotes(soups: list[BeautifulSoup]) -> list[Footnote]:
     for soup in soups:
         if _is_notes_chapter(soup):
             _parse_notes_chapter(soup, notes)
-            soup.body.clear()
+            if soup.body is not None:
+                soup.body.clear()
     if not notes:
         return []
 

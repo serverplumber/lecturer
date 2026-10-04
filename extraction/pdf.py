@@ -356,7 +356,7 @@ def _font_profile(pages: list[list[list[_Line]]]) -> tuple[float, float | None]:
     smaller = {s: w for s, w in weights.items() if s < body_size - 0.5}
     if not smaller:
         return body_size, None
-    note_size = max(smaller, key=smaller.get)  # type: ignore[arg-type]
+    note_size = max(smaller, key=smaller.__getitem__)
     if smaller[note_size] < weights[body_size] * 0.05:
         return body_size, None
     return body_size, note_size

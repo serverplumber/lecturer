@@ -16,8 +16,12 @@ lint:
 fmt:
     uv run ruff format
 
-# Lint + format, same as the commit hooks
-check: lint fmt
+# Type-check the whole project
+typecheck:
+    uv run ty check
+
+# Lint + format + type-check, same as the commit hooks
+check: lint fmt typecheck
 
 # Run lecturer, e.g. `just run extract -o eros_magic texts/some_book.epub`,
 # then `just run -o eros_magic` for the whole chain (see `just run --help` for verbs)

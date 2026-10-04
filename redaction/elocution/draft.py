@@ -155,35 +155,38 @@ def draft(
     ambiguous = collisions(pairings)
     stubs = _ambiguous_stubs(pairings, bibliography, ambiguous)
     known = _known_sigla(elocution_dir, directory)
-    found = [
-        pairing
+    # Keyed by siglum: ``ambiguous`` already excludes any siglum paired with
+    # more than one author, so each remaining siglum names exactly one pairing.
+    found = {
+        pairing.siglum: pairing
         for pairing in pairings
         if pairing.siglum is not None
         and pairing.siglum not in known
         and pairing.siglum not in ambiguous
-    ]
+    }
     path = tier2_path(directory, "classical")
     resolved = 0
     if not found:
         log("classical draft: nothing new to ask the model")
     else:
         request = "\n".join(
-            f"{pairing.author} cites {pairing.siglum} ({pairing.count}x)" for pairing in found
+            f"{pairing.author} cites {siglum} ({pairing.count}x)"
+            for siglum, pairing in found.items()
         )
         answer = provider.ask(_DRAFT_SYSTEM, request, DraftSigla)
         if answer is None:
             log("classical draft: model returned nothing usable")
         else:
-            counts = {pairing.siglum: pairing.count for pairing in found}
+            counts = {siglum: pairing.count for siglum, pairing in found.items()}
             proposed = {
                 item.siglum: {"spoken": item.spoken, "count": counts[item.siglum]}
                 for item in answer.entries
                 if item.siglum in counts
             }
             resolved = len(add_tier2(directory, "classical", proposed))
-            for pairing in found:
-                if pairing.siglum not in proposed:
-                    stubs[pairing.siglum] = {
+            for siglum, pairing in found.items():
+                if siglum not in proposed:
+                    stubs[siglum] = {
                         "note": "the model wasn't confident about this one",
                         "author": pairing.author,
                         "count": pairing.count,

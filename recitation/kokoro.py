@@ -91,15 +91,12 @@ class KokoroReciter:
         """
         if "+" not in voice:
             return voice
-        blend = None
-        total = 0.0
+        styles, factors = [], []
         for part in voice.split("+"):
             name, _, weight = part.partition(":")
-            factor = float(weight) if weight else 1.0
-            style = self._kokoro.get_voice_style(name.strip()) * factor
-            blend = style if blend is None else blend + style
-            total += factor
-        return (blend / total).astype(np.float32)
+            styles.append(self._kokoro.get_voice_style(name.strip()))
+            factors.append(float(weight) if weight else 1.0)
+        return np.average(styles, axis=0, weights=factors).astype(np.float32)
 
     def utter(self, utterance: Utterance) -> np.ndarray | None:
         if utterance.lang == "en":

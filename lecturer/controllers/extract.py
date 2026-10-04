@@ -34,7 +34,9 @@ class Extract(Controller):
                 if link.exists():
                     document = link.resolve()
             if document is None:
-                self.app.args.print_help()
+                # cement's ArgumentHandler interface omits print_help; the argparse
+                # handler actually in use is an ArgumentParser and has it.
+                self.app.args.print_help()  # ty: ignore[unresolved-attribute]
                 return
         elif not document.is_file():
             self.app.log.error(f"no such document: {document}")

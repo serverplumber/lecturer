@@ -1,4 +1,4 @@
-# Local hooks so pre-commit uses the same ruff version pinned in pyproject.toml.
+# Local hooks so pre-commit uses the same ruff and ty versions pinned in pyproject.toml.
 repos:
   - repo: local
     hooks:
@@ -12,3 +12,9 @@ repos:
         entry: uv run ruff format
         language: system
         types_or: [python, pyi]
+      - id: ty-check
+        name: ty check
+        entry: uv run ty check
+        language: system
+        types_or: [python, pyi]
+        pass_filenames: false

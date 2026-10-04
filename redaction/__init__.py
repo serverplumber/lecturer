@@ -1,5 +1,6 @@
 """Rework the extracted text, layer by layer, into a script for the TTS to perform."""
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from extraction import Extraction
@@ -9,6 +10,7 @@ from redaction.elocution import (
     BARE_AUTHORS,
     Elocutor,
     NearMiss,
+    PatternSystem,
     System,
     bare_author_system,
     default_systems,
@@ -56,7 +58,7 @@ def redact(
     extraction: Extraction,
     weaver: Redactor | None = None,
     interpreter: Redactor | None = None,
-    systems: tuple[System, ...] | None = None,
+    systems: Sequence[System | PatternSystem] | None = None,
     directory: Path | None = None,
     elocution_dir: Path | None = None,
 ) -> tuple[Script, list[NearMiss]]:

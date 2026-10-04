@@ -36,7 +36,9 @@ class Base(Controller):
     def _default(self):
         directory = Path(self.app.pargs.output) if self.app.pargs.output else None
         if directory is None or not (directory / WORKING_TEXT).exists():
-            self.app.args.print_help()
+            # cement's ArgumentHandler interface omits print_help; the argparse
+            # handler actually in use is an ArgumentParser and has it.
+            self.app.args.print_help()  # ty: ignore[unresolved-attribute]
             if directory is not None:
                 self.app.log.error(
                     f"no {WORKING_TEXT} in {directory}: run `lecturer extract -o "

@@ -68,6 +68,15 @@ class EpubExtractor:
         return Extraction(sections=_split_sections(paths, soups, leaves, footnotes))
 
 
+def _opf_path(archive: zipfile.ZipFile) -> str:
+    """Where the package document lives, as ``META-INF/container.xml`` names it."""
+    container = ElementTree.fromstring(archive.read(_CONTAINER))
+    rootfile = container.find(".//c:rootfile", _CONTAINER_NS)
+    if rootfile is None:
+        raise ValueError(f"{_CONTAINER} names no rootfile — not a valid EPUB")
+    return rootfile.attrib["full-path"]
+
+
 def _chapter_paths(archive: zipfile.ZipFile) -> list[str]:
     """Return the archive paths of the spine's XHTML chapters, in reading order.
 
@@ -77,8 +86,7 @@ def _chapter_paths(archive: zipfile.ZipFile) -> list[str]:
     document's own ``<li>`` list would otherwise read as running-text
     paragraphs, one chapter title per "line".
     """
-    container = ElementTree.fromstring(archive.read(_CONTAINER))
-    opf_path = container.find(".//c:rootfile", _CONTAINER_NS).attrib["full-path"]
+    opf_path = _opf_path(archive)
     opf = ElementTree.fromstring(archive.read(opf_path))
     opf_dir = PurePosixPath(opf_path).parent
 
@@ -103,8 +111,7 @@ def read_metadata(document: Path) -> Metadata:
     ``<meta name="calibre:timestamp">``), so its year is trustworthy as-is.
     """
     with zipfile.ZipFile(document) as archive:
-        container = ElementTree.fromstring(archive.read(_CONTAINER))
-        opf_path = container.find(".//c:rootfile", _CONTAINER_NS).attrib["full-path"]
+        opf_path = _opf_path(archive)
         opf = ElementTree.fromstring(archive.read(opf_path))
     meta = opf.find(".//opf:metadata", _OPF_NS)
     if meta is None:
@@ -144,8 +151,7 @@ def _nav_leaves(archive: zipfile.ZipFile) -> list[tuple[str, str, str | None]]:
     productions with no EPUB3 nav document to prefer instead, so that path
     isn't built until a real one shows up.
     """
-    container = ElementTree.fromstring(archive.read(_CONTAINER))
-    opf_path = container.find(".//c:rootfile", _CONTAINER_NS).attrib["full-path"]
+    opf_path = _opf_path(archive)
     opf = ElementTree.fromstring(archive.read(opf_path))
     opf_dir = PurePosixPath(opf_path).parent
 
@@ -180,17 +186,30 @@ def _flatten_navmap(
     return leaves
 
 
+def _attr(tag: Tag, name: str) -> str:
+    """A tag's attribute as one string, ``""`` when absent.
+
+    bs4 splits a few multi-valued attributes (``class``, ``rel``, ...) into
+    token lists; none read here are among them, but rejoining one keeps the
+    result a plain string either way.
+    """
+    value = tag.get(name)
+    if value is None:
+        return ""
+    return value if isinstance(value, str) else " ".join(value)
+
+
 def _semantic_types(tag: Tag) -> set[str]:
     """The EPUB/ARIA semantics of a tag; both attributes hold space-separated tokens."""
-    return set((tag.get("epub:type") or "").split()) | set((tag.get("role") or "").split())
+    return set(_attr(tag, "epub:type").split()) | set(_attr(tag, "role").split())
 
 
 def _pull_footnotes(soup: BeautifulSoup) -> list[Footnote]:
     """Detach footnote elements from the document and return them."""
     notes = []
-    for element in soup.find_all(lambda tag: _semantic_types(tag) & _NOTE_TYPES):
+    for element in soup.find_all(lambda tag: bool(_semantic_types(tag) & _NOTE_TYPES)):
         element.extract()
-        notes.append(Footnote(ref=element.get("id", ""), text=element.get_text(" ", strip=True)))
+        notes.append(Footnote(ref=_attr(element, "id"), text=element.get_text(" ", strip=True)))
     return notes
 
 
@@ -225,12 +244,12 @@ def _pull_bibliography(soup: BeautifulSoup) -> tuple[list[BibliographyEntry], st
         lambda tag: (
             tag.name in _HEADING_TAGS
             and len(title := tag.get_text(" ", strip=True)) <= _MAX_TITLE_LENGTH
-            and BIBLIOGRAPHY_TITLE.search(title)
+            and BIBLIOGRAPHY_TITLE.search(title) is not None
         )
     )
     if heading is None:
         return [], None
-    heading_id = heading.get("id")
+    heading_id = _attr(heading, "id") or None
     texts: list[str] = []
     for sibling in list(heading.find_next_siblings()):
         if sibling.name in _HEADING_TAGS:
@@ -251,8 +270,8 @@ def _ends_entry(text: str) -> bool:
 
 def _mark_noterefs(soup: BeautifulSoup) -> None:
     """Replace footnote anchors with ``[^ref]`` markers tying them to their notes."""
-    for anchor in soup.find_all(lambda tag: _semantic_types(tag) & _NOTEREF_TYPES):
-        ref = (anchor.get("href") or "").rpartition("#")[2]
+    for anchor in soup.find_all(lambda tag: bool(_semantic_types(tag) & _NOTEREF_TYPES)):
+        ref = _attr(anchor, "href").rpartition("#")[2]
         anchor.replace_with(f"[^{ref}]")
 
 
@@ -274,11 +293,11 @@ def _effective_id(anchor: Tag) -> str | None:
     than carrying both on one tag the way other conversions do (Yates,
     Coetzee). The bookmark always comes first.
     """
-    if anchor.get("id"):
-        return anchor["id"]
+    if own := _attr(anchor, "id"):
+        return own
     prev = anchor.find_previous_sibling("a")
-    if prev is not None and prev.get("id") and not prev.get("href"):
-        return prev["id"]
+    if prev is not None and _attr(prev, "id") and not _attr(prev, "href"):
+        return _attr(prev, "id")
     return None
 
 
@@ -300,7 +319,7 @@ def _links_back(target: Tag, target_path: str, path: str, own_id: str) -> bool:
         candidates = [target, *candidates]
     if not candidates and target.parent is not None:
         candidates = target.parent.find_all("a", href=True)
-    return any(_resolve_href(target_path, a["href"]) == (path, own_id) for a in candidates)
+    return any(_resolve_href(target_path, _attr(a, "href")) == (path, own_id) for a in candidates)
 
 
 def _is_note_like(tag: Tag) -> bool:
@@ -350,7 +369,7 @@ def _pull_href_footnotes(paths: list[str], soups: list[BeautifulSoup]) -> list[F
     ids: dict[tuple[str, str], Tag] = {}
     for path, soup in zip(paths, soups, strict=True):
         for tag in soup.find_all(id=True):
-            ids[(path, tag["id"])] = tag
+            ids[(path, _attr(tag, "id"))] = tag
 
     by_effective_id: dict[tuple[str, str], Tag] = {}
     pairs: dict[frozenset, tuple[str, str, str, str]] = {}
@@ -360,7 +379,7 @@ def _pull_href_footnotes(paths: list[str], soups: list[BeautifulSoup]) -> list[F
             if own_id is None:
                 continue
             by_effective_id[(path, own_id)] = anchor
-            resolved = _resolve_href(path, anchor["href"])
+            resolved = _resolve_href(path, _attr(anchor, "href"))
             if resolved is None:
                 continue
             target_path, target_frag = resolved
@@ -400,7 +419,7 @@ def _pull_href_footnotes(paths: list[str], soups: list[BeautifulSoup]) -> list[F
         if container is None:
             continue
         for backlink in container.find_all("a", href=True):
-            if _resolve_href(note_path, backlink["href"]) == (ref_path, ref_id):
+            if _resolve_href(note_path, _attr(backlink, "href")) == (ref_path, ref_id):
                 backlink.extract()
         footnotes.append(Footnote(ref=note_id, text=container.get_text(" ", strip=True)))
         container.extract()

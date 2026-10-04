@@ -62,10 +62,10 @@ _SYNOPSIS_CHARS = 600_000
 def price_tokens(
     model: str,
     *,
-    input_tokens: int = 0,
-    cache_creation_tokens: int = 0,
-    cache_read_tokens: int = 0,
-    output_tokens: int = 0,
+    input_tokens: float = 0,
+    cache_creation_tokens: float = 0,
+    cache_read_tokens: float = 0,
+    output_tokens: float = 0,
 ) -> float | None:
     """Real dollar cost for a set of token counts under ``model``.
 
@@ -77,9 +77,10 @@ def price_tokens(
     keeping the two from drifting apart the way the estimate's own input
     figure and a run's real reported cost once did (see CLAUDE.md).
     """
-    price_in, price_out = _PRICING.get(model, (None, None))
-    if price_in is None:
+    pricing = _PRICING.get(model)
+    if pricing is None:
         return None
+    price_in, price_out = pricing
     return (
         input_tokens * price_in
         + cache_creation_tokens * price_in * _CACHE_WRITE_MULTIPLIER

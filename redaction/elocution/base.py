@@ -123,6 +123,20 @@ LOCATOR = rf"\d+(?:[.:]\d+)*(?:[{_RANGE_DASH}]{_ZWS}?\d+(?:[.:]\d+)*)?"
 
 
 _STEPHANUS_UNIT = r"\d+[a-e]\d*"
+
+
+def _matched(pattern: re.Pattern[str], text: str) -> re.Match[str]:
+    """``pattern.match(text)``, for text a wider pattern has already accepted.
+
+    Every speaker below re-parses a span the merged citation pattern just
+    matched, so a miss here means the two patterns have drifted apart.
+    """
+    match = pattern.match(text)
+    if match is None:
+        raise ValueError(f"{pattern.pattern!r} doesn't match already-recognised {text!r}")
+    return match
+
+
 _STEPHANUS_UNIT_RE = re.compile(r"(\d+)([a-e])(\d*)")
 # A Stephanus locator: a page number, section letter (a-e — the five parts
 # Estienne's 1578 Plato divides each page into), optional line number,
@@ -141,7 +155,7 @@ def stephanus_locator(locator: str) -> str:
     for unit in re.finditer(_STEPHANUS_UNIT, locator):
         if pieces:
             pieces.append(" to ")
-        page, letter, line = _STEPHANUS_UNIT_RE.match(unit.group(0)).groups()
+        page, letter, line = _matched(_STEPHANUS_UNIT_RE, unit.group(0)).groups()
         piece = f"{_spell(int(page))} {letter.upper()}"
         if line:
             piece += f", {_spell(int(line))}"
@@ -165,7 +179,7 @@ def diels_kranz_locator(locator: str) -> str:
     capitalised (it already is, in this grammar) so a TTS reads it as a
     letter name.
     """
-    chapter, letter, item = _DK_UNIT_RE.match(locator).groups()
+    chapter, letter, item = _matched(_DK_UNIT_RE, locator).groups()
     return f"{_spell(int(chapter))}, {letter}, {_spell(int(item))}"
 
 
@@ -237,7 +251,7 @@ def speak_qumran(citation: str) -> str:
     "...the Thanksgiving Hymns, eleven, nineteen to twenty-two" — a
     trailing locator is spoken with the shared mechanical scheme.
     """
-    cave, body, letter, locator = _QUMRAN_RE.match(citation).groups()
+    cave, body, letter, locator = _matched(_QUMRAN_RE, citation).groups()
     spoken = QUMRAN_NAMES[body] if body in QUMRAN_NAMES else _spell_digits(body)
     result = f"{_spell_digits(cave)} Q, {spoken}"
     if letter:
@@ -431,14 +445,17 @@ def _merge(
     of this project's ``PatternSystem`` entries share a prefix with any
     table siglum, so it hasn't had to be adjudicated yet.
     """
-    entries: list[_Entry | _PatternEntry] = [
+    table = [
         _Entry(siglum, spoken, system)
         for system in systems
         if isinstance(system, System)
         for siglum, spoken in system.sigla.items()
     ]
-    entries.sort(key=lambda entry: len(entry.siglum), reverse=True)
-    entries.extend(_PatternEntry(system) for system in systems if isinstance(system, PatternSystem))
+    table.sort(key=lambda entry: len(entry.siglum), reverse=True)
+    entries: list[_Entry | _PatternEntry] = [
+        *table,
+        *(_PatternEntry(system) for system in systems if isinstance(system, PatternSystem)),
+    ]
     if not entries:
         return re.compile(r"(?!)"), []
     branches = []
@@ -520,12 +537,14 @@ class Elocutor:
 
     def _replace(self, match: re.Match[str]) -> str:
         group = match.lastgroup
+        if group is None:
+            raise ValueError("every branch of the merged pattern is a named group")
         # "sig{i}"/"loc{i}"/"cont{i}"/"pat{i}" all end in the same index;
-        # trailing digits, not a fixed-length prefix, since ``cont{i}`` is
+        # the digits, not a fixed-length prefix, since ``cont{i}`` is
         # always what ``lastgroup`` reports for a table-driven entry (a
         # ``*``-repeated group "participates" and becomes the last-matched
         # group even when it matches zero repetitions).
-        index = int(re.search(r"\d+$", group).group())
+        index = int(re.sub(r"\D", "", group))
         entry = self._entries[index]
         if isinstance(entry, _PatternEntry):
             return entry.system.speak(match.group(group))

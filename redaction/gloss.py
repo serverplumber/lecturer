@@ -189,7 +189,7 @@ class Glossator:
     def cache_size(self) -> int:
         return len(self._cache)
 
-    def use_synopsis(self, synopsis: str) -> None:
+    def use_synopsis(self, synopsis: str | None) -> None:
         """Attach a synopsis drafted after construction.
 
         ``redact --llm``'s budget gate constructs the Glossator (to check
@@ -245,17 +245,20 @@ class Glossator:
         pieces = self._cache.get(key)
         if pieces is None:
             self.calls += 1
-            pieces, reason = self._ask(section_title, utterance.text, present, context)
-            if pieces is None:
+            # Indexed rather than unpacked: only ``answer[0] is None`` narrows
+            # ``answer[1]`` to the failure reason's ``str``.
+            answer = self._ask(section_title, utterance.text, present, context)
+            if answer[0] is None:
                 self.reverted.append(
                     RevertedParagraph(
                         section_title=section_title,
                         refs=refs,
-                        reason=reason,
+                        reason=answer[1],
                         context=utterance.text[:300],
                     )
                 )
                 return weave_utterance(utterance, notes, woven)
+            pieces = answer[0]
             self._cache[key] = pieces
             self._save_cache()
         # Dropping a bare citation is the model doing its job, so every note
@@ -269,7 +272,7 @@ class Glossator:
         paragraph: str,
         notes: dict[str, Footnote],
         context: str | None = None,
-    ) -> tuple[list[dict] | None, str | None]:
+    ) -> tuple[list[dict], None] | tuple[None, str]:
         request = _request_text(section_title, paragraph, notes)
         woven = self.provider.ask(_SYSTEM, request, WovenParagraph, context=context)
         if woven is None:

@@ -17,6 +17,7 @@ from typing import Literal, Protocol, TypeVar
 
 import anthropic
 import openai
+from anthropic.types import TextBlockParam
 from pydantic import BaseModel, ValidationError
 
 
@@ -56,6 +57,20 @@ class Provider(Protocol):
     def ask(
         self, system: str, request: str, schema: type[Schema], context: str | None = None
     ) -> Schema | None: ...
+
+
+def _system_blocks(system: str, context: str | None) -> str | list[TextBlockParam]:
+    """The system prompt, with ``context`` appended as a cached block when given.
+
+    Shared by ``ask`` and ``count_input_tokens`` so the free count is built
+    from exactly the request a real call sends.
+    """
+    if context is None:
+        return system
+    return [
+        {"type": "text", "text": system},
+        {"type": "text", "text": context, "cache_control": {"type": "ephemeral"}},
+    ]
 
 
 class AnthropicProvider:
@@ -101,13 +116,7 @@ class AnthropicProvider:
         self, system: str, request: str, schema: type[Schema], context: str | None = None
     ) -> Schema | None:
         extra = {"output_config": {"effort": self._effort}} if self._effort else {}
-        if context is None:
-            prompt = system
-        else:
-            prompt = [
-                {"type": "text", "text": system},
-                {"type": "text", "text": context, "cache_control": {"type": "ephemeral"}},
-            ]
+        prompt = _system_blocks(system, context)
         if self._thinking:
             extra["thinking"] = {"type": "adaptive"}
         try:
@@ -171,28 +180,16 @@ class AnthropicProvider:
         everything before and including it, system prompt included.
         """
         extra = {"output_config": {"effort": self._effort}} if self._effort else {}
-        prompt: str | list[dict] | None
-        if system is None:
-            prompt = None
-        elif context is None:
-            prompt = system
-        else:
-            prompt = [
-                {"type": "text", "text": system},
-                {"type": "text", "text": context, "cache_control": {"type": "ephemeral"}},
-            ]
         if self._thinking:
             extra["thinking"] = {"type": "adaptive"}
-        kwargs = {
-            "model": self._model,
-            "messages": [{"role": "user", "content": request}],
-            "output_format": schema,
-            **extra,
-        }
-        if prompt is not None:
-            kwargs["system"] = prompt
         try:
-            result = self._client.messages.count_tokens(**kwargs)
+            result = self._client.messages.count_tokens(
+                model=self._model,
+                system=anthropic.omit if system is None else _system_blocks(system, context),
+                messages=[{"role": "user", "content": request}],
+                output_format=schema,
+                **extra,
+            )
         except anthropic.BadRequestError as error:
             if self._thinking and "adaptive thinking is not supported" in str(error):
                 self._thinking = False
