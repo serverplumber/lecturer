@@ -16,7 +16,7 @@ from extraction import Extraction
 from redaction.base import Script
 from redaction.gloss import _SYNOPSIS_SYSTEM, _SYSTEM, Glossator, Synopsis
 from redaction.mend import SeamMender
-from redaction.providers import AnthropicProvider, WovenParagraph
+from redaction.providers import AnthropicProvider, WovenParagraph, family_label, model_family
 from redaction.usage import load_usage
 
 # $/MTok (input, output) — Anthropic first-party pricing for models this
@@ -25,12 +25,14 @@ from redaction.usage import load_usage
 # means abstaining from a dollar figure, the same posture bibliography.py's
 # sniff_style takes on an unconfirmed house style — reporting token counts
 # with no price rather than guessing.
+#
+# Keyed by model family, not version: the default follows each family's
+# newest release (see AnthropicProvider), and pricing has held per tier
+# across recent versions, so a version-exact table would only go stale.
 _PRICING: dict[str, tuple[float, float]] = {
-    "claude-opus-4-8": (5.00, 25.00),
-    "claude-opus-5": (5.00, 25.00),
-    "claude-sonnet-5": (3.00, 15.00),
-    "claude-sonnet-4-6": (3.00, 15.00),
-    "claude-haiku-4-5": (1.00, 5.00),
+    "claude-opus": (5.00, 25.00),
+    "claude-sonnet": (3.00, 15.00),
+    "claude-haiku": (1.00, 5.00),
 }
 
 # Anthropic's ephemeral prompt cache (5-minute TTL, the only TTL this
@@ -42,15 +44,14 @@ _CACHE_READ_MULTIPLIER = 0.1
 # Below this many prefix tokens, a model silently doesn't cache at all (no
 # error, just cache_creation_input_tokens: 0) — and the floor isn't monotonic
 # across generations: Claude Opus 5 halves Opus 4.8's own 1024-token floor.
-# Looked up per model rather than a single constant for that reason; an
-# unlisted model falls back to the middle value in Anthropic's own published
-# range rather than guessing high or low.
+# Looked up per family (each family's newest known floor) rather than a
+# single constant for that reason; an unlisted family falls back to the
+# middle value in Anthropic's own published range rather than guessing high
+# or low.
 _CACHE_MINIMUMS: dict[str, int] = {
-    "claude-opus-5": 512,
-    "claude-opus-4-8": 1024,
-    "claude-sonnet-5": 1024,
-    "claude-sonnet-4-6": 1024,
-    "claude-haiku-4-5": 4096,
+    "claude-opus": 512,
+    "claude-sonnet": 1024,
+    "claude-haiku": 4096,
 }
 _DEFAULT_CACHE_MINIMUM = 1024
 
@@ -77,7 +78,7 @@ def price_tokens(
     keeping the two from drifting apart the way the estimate's own input
     figure and a run's real reported cost once did (see CLAUDE.md).
     """
-    pricing = _PRICING.get(model)
+    pricing = _PRICING.get(model_family(model))
     if pricing is None:
         return None
     price_in, price_out = pricing
@@ -229,13 +230,13 @@ def estimate_gloss_cost(
             "re-writes the prefix instead, at the higher write price rather than the read price."
         )
 
-    priced = provider.model in _PRICING
+    priced = model_family(provider.model) in _PRICING
     if not priced:
         caveats.append(
             f"no pricing on file for model {provider.model!r} — reporting token counts only."
         )
 
-    min_cacheable = _CACHE_MINIMUMS.get(provider.model, _DEFAULT_CACHE_MINIMUM)
+    min_cacheable = _CACHE_MINIMUMS.get(model_family(provider.model), _DEFAULT_CACHE_MINIMUM)
     base_tokens = 0
     write_tokens = 0
     read_tokens = 0
@@ -289,7 +290,7 @@ def estimate_gloss_cost(
     matching = [
         record
         for record in load_usage(directory / "gloss_usage.jsonl")
-        if record.provider_label == provider.label
+        if family_label(record.provider_label) == family_label(provider.label)
     ]
     output_dollars = None
     output_basis = None
@@ -302,12 +303,13 @@ def estimate_gloss_cost(
             average_output = total_output / billed_calls
             output_basis = (
                 f"{billed_calls} real call{'s' if billed_calls != 1 else ''} "
-                f"on {provider.label}, from this book's own history"
+                f"on {family_label(provider.label)}, from this book's own history"
             )
             output_dollars = price_tokens(provider.model, output_tokens=average_output * remaining)
             if total_truncated:
                 caveats.append(
-                    f"{total_truncated} of {total_calls} historical call(s) on {provider.label} "
+                    f"{total_truncated} of {total_calls} historical call(s) on "
+                    f"{family_label(provider.label)} "
                     "were truncated and their real output tokens are missing from this average "
                     "— the output estimate is a lower bound."
                 )

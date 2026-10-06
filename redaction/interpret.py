@@ -24,7 +24,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from redaction.base import Script, ScriptSection, Utterance
-from redaction.providers import Provider
+from redaction.providers import Provider, family_label
 
 _SYSTEM = """\
 You are preparing a scholarly monograph (religious studies) for audio narration \
@@ -100,7 +100,14 @@ class TongueInterpreter:
 
     def _ask(self, batch: list[Utterance]) -> dict[int, list[Switch]]:
         request = "\n\n".join(f"[{i}] {u.text}" for i, u in enumerate(batch))
-        key = hashlib.sha256(f"{self.provider.label}\0{request}".encode()).hexdigest()
+        key = _key(family_label(self.provider.label), request)
+        if key not in self._cache:
+            # Pre-family entries were keyed by an exact model version; move a
+            # hit under the family key (see Glossator._lookup).
+            for label in getattr(self.provider, "versioned_labels", list)():
+                if (legacy := _key(label, request)) in self._cache:
+                    self._cache[key] = self._cache.pop(legacy)
+                    break
         raw = self._cache.get(key)
         if raw is None:
             answer = self.provider.ask(_SYSTEM, request, Switches)
@@ -167,3 +174,7 @@ def _locate(text: str, needle: str) -> tuple[int, int] | None:
     pattern = r"\s+".join(re.escape(word) for word in needle.split())
     match = re.search(pattern, text)
     return (match.start(), match.end()) if match else None
+
+
+def _key(label: str, request: str) -> str:
+    return hashlib.sha256(f"{label}\0{request}".encode()).hexdigest()

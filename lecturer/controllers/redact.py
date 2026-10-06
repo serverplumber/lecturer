@@ -114,7 +114,7 @@ class Redact(Controller):
                     self.app.log.warning(
                         f"{stale} of {glossator.cache_size} cached gloss(es) in "
                         f"gloss_cache.json don't match any paragraph under {provider.label} "
-                        "— most likely glossed under a different model or prompt; those "
+                        "— most likely glossed under a different model family or prompt; those "
                         "paragraphs will be re-sent and re-billed this run"
                     )
                 if self.app.pargs.provider == "anthropic":

@@ -13,6 +13,7 @@ glosses with whatever the laptop is serving.
 """
 
 import os
+import re
 from typing import Literal, Protocol, TypeVar
 
 import anthropic
@@ -73,9 +74,63 @@ def _system_blocks(system: str, context: str | None) -> str | list[TextBlockPara
     ]
 
 
+_FAMILY = re.compile(r"^(claude-[a-z]+)-\d")
+_VERSIONED = re.compile(r"\b(claude-[a-z]+)-\d[\w-]*")
+_DATED = re.compile(r"-\d{8}$")
+
+
+def model_family(model: str) -> str:
+    """``claude-opus-5-5`` → ``claude-opus``; anything unversioned is returned as-is."""
+    match = _FAMILY.match(model)
+    return match.group(1) if match else model
+
+
+def family_label(label: str) -> str:
+    """A provider label with the model version dropped: ``anthropic/claude-opus``.
+
+    What caches and usage history key on, so a new release of the same
+    family reuses everything an earlier one produced rather than orphaning
+    it. Labels with no Claude model in them (OpenAI, local servers) pass
+    through unchanged.
+    """
+    return _VERSIONED.sub(r"\1", label)
+
+
 class AnthropicProvider:
+    """``model`` may be a bare family (``claude-opus``), resolved to the newest
+    version the account lists — so the default follows new releases without
+    an edit here — or an exact ID, used as given.
+    """
+
     def __init__(self, model: str, base_url: str | None = None, effort: str | None = None) -> None:
-        self.label = f"anthropic/{model}" + (f"+effort={effort}" if effort else "")
+        # The SDK's own default (2) retries 429/5xx with backoff but wasn't
+        # enough to ride out a real run of transient 500s this session — a
+        # long book means dozens of sequential calls, so raising it here
+        # costs nothing on the common case and saves a manual re-run on a bad
+        # patch of Anthropic's infra.
+        self._client = anthropic.Anthropic(
+            max_retries=6, **({"base_url": base_url} if base_url else {})
+        )
+        family = model_family(model)
+        try:
+            listed = [
+                m for m in self._client.models.list(limit=100) if model_family(m.id) == family
+            ]
+        except anthropic.APIError as error:
+            if model == family:
+                raise ProviderError(f"can't resolve {family} to a version: {error}") from error
+            listed = []  # an exact ID needs no listing; only cache migration loses out
+        listed.sort(key=lambda m: m.created_at, reverse=True)
+        if model == family:
+            if not listed:
+                raise ProviderError(f"no {family} model is available to this account")
+            model = listed[0].id
+        # Every spelling an earlier run of this family may have keyed a cache
+        # under: each listed ID, its undated alias, and the model in use.
+        versions = {model} | {m.id for m in listed} | {_DATED.sub("", m.id) for m in listed}
+        suffix = f"+effort={effort}" if effort else ""
+        self._versioned_labels = sorted(f"anthropic/{v}{suffix}" for v in versions)
+        self.label = f"anthropic/{model}{suffix}"
         self.model = model
         self.input_tokens = 0
         self.output_tokens = 0
@@ -97,20 +152,16 @@ class AnthropicProvider:
         self.truncated = 0
         self._model = model
         self._effort = effort
-        # The SDK's own default (2) retries 429/5xx with backoff but wasn't
-        # enough to ride out a real run of transient 500s this session — a
-        # long book means dozens of sequential calls, so raising it here
-        # costs nothing on the common case and saves a manual re-run on a bad
-        # patch of Anthropic's infra.
-        self._client = anthropic.Anthropic(
-            max_retries=6, **({"base_url": base_url} if base_url else {})
-        )
         # Optimistic until proven otherwise: adaptive thinking isn't available
         # on every model (Haiku 4.5 rejects it outright with a 400), and which
         # models support it isn't something to hardcode a list for — it's
         # cheaper and more robust to just find out from the API once per
         # instance and stop asking, than to guess from a model name.
         self._thinking = True
+
+    def versioned_labels(self) -> list[str]:
+        """Version-specific labels for this family, for migrating old cache keys."""
+        return self._versioned_labels
 
     def ask(
         self, system: str, request: str, schema: type[Schema], context: str | None = None
@@ -263,14 +314,16 @@ PROVIDERS: dict[str, type[AnthropicProvider] | type[OpenAIProvider]] = {
     "openai": OpenAIProvider,
 }
 
+# Anthropic defaults name a family, not a version: AnthropicProvider resolves
+# it to the newest release on every run (Fable is deliberately not a default).
 DEFAULT_MODELS = {
-    "anthropic": "claude-opus-5",
+    "anthropic": "claude-opus",
     "openai": "gpt-5.1",
 }
 
 # Language tagging is classification, not composition — code is cheap,
 # tokens aren't, so the interpreter defaults to the cheap tier.
 TAGGING_MODELS = {
-    "anthropic": "claude-haiku-4-5",
+    "anthropic": "claude-haiku",
     "openai": "gpt-5-mini",
 }

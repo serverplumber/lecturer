@@ -726,7 +726,8 @@ Everything routine is in the `justfile`:
   (`--model claude-opus-4-7`, not in `estimate.py`'s pricing table)
   correctly abstained from a dollar figure while still reporting the real
   total token count, the same abstain-over-guess posture as
-  `bibliography.py`'s `sniff_style`.
+  `bibliography.py`'s `sniff_style` (pricing is keyed by family now, so any
+  Opus is priced; an unlisted family such as Fable still abstains).
   `Glossator.calls`/`.gloss_input_tokens`/`.gloss_output_tokens`/
   `.gloss_truncated` baseline against the provider's own running counters
   at construction time specifically so `ensure_synopsis`'s call (made on
@@ -795,31 +796,46 @@ Everything routine is in the `justfile`:
   cold-starting, confirming the full loop this spec and `estimate-gloss`
   together describe holds end to end.
 - **Edge case, surfaced switching this project's own default model**:
-  `gloss_cache.json` is scoped per model, not per paragraph —
-  `Glossator._key` hashes `provider.label` (which encodes the model name)
-  alongside the paragraph and its notes, so bumping `DEFAULT_MODELS`'
-  Anthropic default (as this session did, `claude-opus-4-8` →
-  `claude-opus-5`) silently orphans every cache entry a prior run made
-  under the old model: not a bug in the lookup, a real consequence of
-  intentionally not mixing two models' prose within one book, but a costly
-  surprise if it happens silently. Confirmed concretely against
-  `eros_magic`'s own real `gloss_cache.json` (145 entries from a real prior
-  run): `estimate-gloss` reported 150 remaining paragraphs under the old
-  default, 295 (every one of the 145 no longer hitting) under the new one.
-  `Redact._default` (`lecturer.py`) now warns before spending anything:
-  `Glossator.stale_cache_entries` (shares its paragraph walk with
+  `gloss_cache.json` was originally scoped per exact model version —
+  `Glossator._key` hashed `provider.label` alongside the paragraph and its
+  notes, so bumping `DEFAULT_MODELS`' Anthropic default (`claude-opus-4-8`
+  → `claude-opus-5`) silently orphaned every entry a prior run made.
+  Confirmed against `eros_magic`'s real cache (145 entries): 150 remaining
+  paragraphs under the old default, 295 under the new one.
+  `Redact._default` warns before spending anything:
+  `Glossator.stale_cache_entries` (sharing its paragraph walk with
   `pending_paragraphs` via the private `_annotated` generator, so the two
-  can't drift apart) counts cache entries that match no paragraph in the
-  current script under the _current_ model, and `redact --llm` logs how
-  many of the cache's entries won't be reused before making any billed
-  call. Not proof the cause is specifically a model change (an edited
-  source text or a changed weaving pipeline would also orphan entries), but
-  it's the single most likely cause and cheap to check. No
-  `--sections`-style per-chapter scoping exists on `redact` (that flag is
-  `recite`/`publish`-only, for choosing which sections get _audio_) —
-  there's currently no way to gloss only part of a book to sidestep this;
-  the cache is already paragraph-cheap on a re-run (skips everything
-  unaffected), the warning is what's new.
+  can't drift apart) counts entries matching no paragraph in the current
+  script, and `redact --llm` logs that count before any billed call. Not
+  proof of a model change (an edited source or weaving pipeline orphans
+  entries too), but the likeliest cause and cheap to check.
+
+  **Now keyed by model family, not version.** Opus 5 was doing the job
+  well and Sonnet wasn't, so a new release of the _same_ family should
+  reuse what an older one glossed rather than re-bill the book; a
+  different family still starts fresh. `DEFAULT_MODELS`/`TAGGING_MODELS`
+  name families (`claude-opus`, `claude-haiku`) and `AnthropicProvider`
+  resolves one to the newest version `models.list()` returns, so the
+  default follows releases with no edit here (Fable is deliberately
+  never a default; an exact `--model` ID is used as given). `_key` hashes
+  `providers.family_label(provider.label)` (`anthropic/claude-opus`);
+  `Glossator._lookup` — and `TongueInterpreter._ask` for
+  `tongue_cache.json` — tries every version label the provider lists
+  (each ID plus its undated alias) on a miss and moves a hit under the
+  family key, persisted with the next cache write, so pre-change caches
+  migrate in place rather than being re-keyed by a separate tool.
+  `estimate.py`'s pricing and cache-minimum tables and its usage-history
+  match key on family too. Verified on `eros_magic`: `estimate-gloss`
+  resolved `claude-opus-5-5` and priced only the 80 truly pending
+  paragraphs (the 218 opus-5 glosses migrated, not orphaned), then a real
+  `redact --llm --budget 20` billed exactly those 80 for $3.48 against a
+  $3.29 estimate. Every one passed `_faithful` — including the 55 rejects
+  with no visible cause and the 3 dash cases — so `gloss_rejects.json`
+  stayed empty and what failed under opus-5 is still unknown. Not
+  verified: whether a family's pricing actually holds across versions
+  (assumed), and Opus 5.5's real cache minimum (opus-5's 512 assumed).
+  No `--sections`-style scoping exists on `redact`; the cache is
+  paragraph-cheap on a re-run regardless.
 - **Found completing `eros_magic` for real, glossing under
   `claude-opus-4-8`**:
     - `AnthropicProvider.ask` used `messages.parse` (non-streaming); the

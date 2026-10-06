@@ -35,6 +35,12 @@ glossator), `--interpret`, `draft-lexicon`, `draft-classical` — need either
 points any of them at a local OpenAI-compatible server instead (Ollama,
 llama.cpp, ...) — see `redaction/providers.py`.
 
+Anthropic defaults name a model family, not a version: `claude-opus` for
+glossing and `draft-classical`, `claude-haiku` for the cheap tier. Each run
+resolves the family to the newest release your account lists, and caches
+are keyed by family, so a new release reuses what an older one already
+glossed. Pass `--model` with an exact ID to pin one.
+
 ## Where the design reasoning lives
 
 `CLAUDE.md` is the single source of truth for _why_ — every non-obvious

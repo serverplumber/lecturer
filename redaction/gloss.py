@@ -31,7 +31,7 @@ from pydantic import BaseModel
 
 from extraction import Footnote
 from redaction.base import ANCHOR, Manner, Script, ScriptSection, Utterance
-from redaction.providers import Provider, WovenParagraph
+from redaction.providers import Provider, WovenParagraph, family_label
 from redaction.weave import weave_utterance
 
 _SYSTEM = """\
@@ -251,8 +251,7 @@ class Glossator:
             return [utterance]
         present = {ref: notes[ref] for ref in refs if ref in notes}
 
-        key = self._key(utterance.text, present)
-        pieces = self._cache.get(key)
+        key, pieces = self._lookup(utterance.text, present)
         if pieces is None:
             self.calls += 1
             # Indexed rather than unpacked: only ``answer[0] is None`` narrows
@@ -319,7 +318,7 @@ class Glossator:
                 if not refs:
                     continue
                 present = {ref: notes[ref] for ref in refs if ref in notes}
-                key = self._key(utterance.text, present)
+                key, _ = self._lookup(utterance.text, present)
                 yield section.title, section_index, utterance.text, present, context, key
 
     def pending_paragraphs(self, script: Script) -> list[PendingParagraph]:
@@ -342,10 +341,10 @@ class Glossator:
     def stale_cache_entries(self, script: Script) -> int:
         """Cached glosses in this work dir that match no paragraph in ``script``.
 
-        ``_key`` hashes ``provider.label`` (which encodes the model) into
-        every cache key, so switching the configured model — including via
-        ``DEFAULT_MODELS``' own default changing between runs — silently
-        orphans every entry a prior run under the old model produced: not a
+        ``_key`` hashes the provider's family label (provider and model
+        family, version dropped) into every cache key, so switching to a
+        different family — Opus to Sonnet, say — silently orphans every
+        entry a prior run under the old one produced: not a
         cache lookup failure, a real edge case, since those paragraphs will
         be re-sent and re-billed rather than reused. Editing the source text
         or this file's own weaving pipeline would also orphan entries, so a
@@ -358,12 +357,34 @@ class Glossator:
         matched = {key for *_, key in self._annotated(script) if key in self._cache}
         return len(self._cache) - len(matched)
 
-    def _key(self, paragraph: str, notes: dict[str, Footnote]) -> str:
+    def _key(self, paragraph: str, notes: dict[str, Footnote], label: str | None = None) -> str:
         payload = json.dumps(
-            [self.provider.label, paragraph, {ref: note.text for ref, note in notes.items()}],
+            [
+                label or family_label(self.provider.label),
+                paragraph,
+                {ref: note.text for ref, note in notes.items()},
+            ],
             sort_keys=True,
         )
         return hashlib.sha256(payload.encode()).hexdigest()
+
+    def _lookup(self, paragraph: str, notes: dict[str, Footnote]) -> tuple[str, list[dict] | None]:
+        """The paragraph's cache key, and its cached gloss if there is one.
+
+        Keys name the model family, not the version, so a newer release
+        reuses an older one's glosses. Entries from before that change were
+        keyed by an exact version (``anthropic/claude-opus-5``); a miss
+        tries each of the family's version labels and moves a hit under the
+        family key — in memory, persisted with the next cache write.
+        """
+        key = self._key(paragraph, notes)
+        if key not in self._cache:
+            for label in getattr(self.provider, "versioned_labels", list)():
+                legacy = self._key(paragraph, notes, label)
+                if legacy in self._cache:
+                    self._cache[key] = self._cache.pop(legacy)
+                    break
+        return key, self._cache.get(key)
 
     def _keep_reject(
         self, key: str, paragraph: str, notes: dict[str, Footnote], woven: WovenParagraph
