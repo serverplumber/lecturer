@@ -185,7 +185,10 @@ def estimate_gloss_cost(
     per-paragraph total, since it happens once regardless of paragraph count.
     """
     glossator = Glossator(
-        provider=provider, cache_path=directory / "gloss_cache.json", synopsis=synopsis
+        provider=provider,
+        cache_path=directory / "gloss_cache.json",
+        synopsis=synopsis,
+        rejects_path=directory / "gloss_rejects.json",
     )
     script = SeamMender().redact(Script.from_extraction(extraction))
     pending = glossator.pending_paragraphs(script)

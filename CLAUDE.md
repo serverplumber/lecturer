@@ -216,8 +216,11 @@ something unverifiable, that's the thing to push back on.
   local models run via the openai adapter with `--base-url` pointed at any
   OpenAI-compatible server (Ollama etc.; `--effort high` for gpt-oss). A
   faithfulness guard requires the returned body prose to reproduce the
-  paragraph verbatim and in full; guarded or failed paragraphs fall back to
-  the verbatim weave. `AnthropicProvider` sends
+  paragraph verbatim and in full, letter for letter with whitespace ignored
+  entirely (`docs/planned/whitespace-faithfulness.md`: a listener only
+  hears word boundaries, and every reject traced to whitespace was the
+  model repairing a space lost at a note anchor); guarded or failed
+  paragraphs fall back to the verbatim weave. `AnthropicProvider` sends
   `thinking={"type": "adaptive"}` optimistically and, on the specific
   `BadRequestError` a model without adaptive-thinking support raises (Haiku
   4.5 among them — the default for every cheap-tier call: `draft-lexicon`,
@@ -587,6 +590,18 @@ something unverifiable, that's the thing to push back on.
   — an extraction bug, not the model (3 more are glued in the book itself,
   before a dash or bracket, so their cause is still unknown). Only a
   faithfulness reject has output to keep; an unusable response has none.
+  When the check later grows more tolerant, `Glossator._lookup` replays a
+  kept reject before calling: the first attempt `_faithful` now accepts is
+  cached and the entry leaves the rejects file, with no call made. The
+  replay happens in memory and is written out only by the glossing path, so
+  `estimate-gloss` (whose own `Glossator` must be given `rejects_path` too
+  — missing at first, which made it price two paragraphs `redact` then
+  recovered for free) excludes recovered paragraphs without writing
+  anything. Verified on `ideas_and_ideals`: its 2 remaining rejects
+  (`Johnson[^…]is`, `1619.[^…]Andreae’s`, unspaced in the EPUB's own
+  markup) were recovered by `redact --llm` with no billed call, and
+  `estimate-gloss` then reported nothing left; the estimator fix was
+  verified synthetically, since that real state was used up.
 - `recitation/` — speaks the script (`--speak`): `Reciter` strategy
   protocol, one WAV per section into the work dir's `audio/`.
   `KokoroReciter` runs Kokoro-82M via kokoro-onnx (pure wheels, CPU ~4×

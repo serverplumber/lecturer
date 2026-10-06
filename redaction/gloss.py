@@ -31,7 +31,7 @@ from pydantic import BaseModel
 
 from extraction import Footnote
 from redaction.base import ANCHOR, Manner, Script, ScriptSection, Utterance
-from redaction.providers import Provider, WovenParagraph, family_label
+from redaction.providers import Piece, Provider, WovenParagraph, family_label
 from redaction.weave import weave_utterance
 
 _SYSTEM = """\
@@ -156,6 +156,12 @@ class Glossator:
         self._rejects: dict[str, dict] = {}
         if rejects_path is not None and rejects_path.exists():
             self._rejects = json.loads(rejects_path.read_text())
+        # Kept rejects a later, more tolerant _faithful accepts: promoted to
+        # the cache by _lookup with no call made. Pending ones are written
+        # out by the glossing path only, so estimate-gloss sees the recovery
+        # without writing anything.
+        self.replayed = 0
+        self._unsaved_replays: set[str] = set()
         self._log = log
         # Billed calls this instance has actually made (cache misses that
         # reached _ask, truncated ones included) — the honest denominator for
@@ -212,7 +218,13 @@ class Glossator:
         self._synopsis = synopsis
 
     def redact(self, script: Script) -> Script:
-        return Script(sections=[self._gloss_section(section) for section in script.sections])
+        glossed = Script(sections=[self._gloss_section(section) for section in script.sections])
+        if self.replayed:
+            self._log(
+                f"recovered {self.replayed} paragraph(s) from gloss_rejects.json — a kept "
+                "response the faithfulness check now accepts, cached with no call made"
+            )
+        return glossed
 
     def _gloss_section(self, section: ScriptSection) -> ScriptSection:
         notes = {note.ref: note for note in section.footnotes}
@@ -252,6 +264,10 @@ class Glossator:
         present = {ref: notes[ref] for ref in refs if ref in notes}
 
         key, pieces = self._lookup(utterance.text, present)
+        if key in self._unsaved_replays:
+            self._unsaved_replays.discard(key)
+            self._save_cache()
+            self._save_rejects()
         if pieces is None:
             self.calls += 1
             # Indexed rather than unpacked: only ``answer[0] is None`` narrows
@@ -384,7 +400,26 @@ class Glossator:
                 if legacy in self._cache:
                     self._cache[key] = self._cache.pop(legacy)
                     break
+        if key not in self._cache and key in self._rejects:
+            self._replay(key)
         return key, self._cache.get(key)
+
+    def _replay(self, key: str) -> None:
+        """Promote a kept reject to the cache if ``_faithful`` now accepts it.
+
+        The response was billed once already; a check that has since grown
+        more tolerant shouldn't make it be paid for again. The first passing
+        attempt wins, and only then does the entry leave the rejects file.
+        """
+        entry = self._rejects[key]
+        for attempt in entry["attempts"]:
+            woven = WovenParagraph(pieces=[Piece(**piece) for piece in attempt["pieces"]])
+            if _faithful(woven, entry["paragraph"]):
+                self._cache[key] = [p.model_dump() for p in woven.pieces if p.text.strip()]
+                del self._rejects[key]
+                self.replayed += 1
+                self._unsaved_replays.add(key)
+                return
 
     def _keep_reject(
         self, key: str, paragraph: str, notes: dict[str, Footnote], woven: WovenParagraph
@@ -400,6 +435,9 @@ class Glossator:
         entry["attempts"].append(
             {"provider": self.provider.label, "pieces": [p.model_dump() for p in woven.pieces]}
         )
+        self._save_rejects()
+
+    def _save_rejects(self) -> None:
         if self._rejects_path is not None:
             partial = self._rejects_path.with_suffix(self._rejects_path.suffix + ".part")
             partial.write_text(json.dumps(self._rejects, ensure_ascii=False, indent=1))
@@ -432,17 +470,22 @@ def _faithful(woven: WovenParagraph, paragraph: str) -> bool:
     """True if the body pieces reproduce the whole paragraph, in order.
 
     Joined back together, the body pieces must equal the anchor-stripped
-    paragraph — comparison ignores whitespace runs and invisible typesetting
-    characters, nothing else. A model that paraphrased, reordered, or
-    "improved" the prose fails, and so does one that quietly swallowed a
-    sentence (weaker local models drop whole stretches): the author's text
-    must survive verbatim and in full, or the paragraph falls back to the
-    deterministic weave.
+    paragraph letter for letter — whitespace and invisible typesetting
+    characters ignored entirely, nothing else. A model that paraphrased,
+    reordered, or "improved" the prose fails, and so does one that quietly
+    swallowed a sentence (weaker local models drop whole stretches): the
+    author's text must survive verbatim and in full, or the paragraph falls
+    back to the deterministic weave.
+
+    Whitespace doesn't count because a listener only hears it as word
+    boundaries, and every reject traced to it was the model repairing a
+    boundary the source had broken — a space lost at a note anchor, in
+    extraction or in the book itself (docs/planned/whitespace-faithfulness.md).
     """
-    source = _collapse(ANCHOR.sub("", paragraph))
-    bodies = [_collapse(piece.text) for piece in woven.pieces if piece.manner == "body"]
-    return " ".join(body for body in bodies if body) == source
+    source = _letters(ANCHOR.sub("", paragraph))
+    bodies = "".join(_letters(piece.text) for piece in woven.pieces if piece.manner == "body")
+    return bodies == source
 
 
-def _collapse(text: str) -> str:
-    return " ".join(_INVISIBLES.sub("", text).split())
+def _letters(text: str) -> str:
+    return "".join(_INVISIBLES.sub("", text).split())

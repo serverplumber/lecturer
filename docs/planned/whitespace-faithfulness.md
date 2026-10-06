@@ -1,6 +1,6 @@
 # Spec: whitespace-blind faithfulness check
 
-Status: not started, scoped only. No dependencies on other open specs.
+Status: implemented, as specified. No dependencies on other open specs.
 Written for handoff to a fresh session — self-contained.
 
 ## Purpose
@@ -109,8 +109,9 @@ the same way `noteref_marker` was verified across all 9 EPUBs.
 ## Open questions for whoever implements this
 
 - Should a replayed reject be logged, so `review.md` can say how many
-  paragraphs were recovered without a call? Cheap, and it makes the
-  replay visible rather than silent.
+  paragraphs were recovered without a call? Settled: `redact` logs the
+  count; `review.md` is unchanged, since a recovered paragraph has nothing
+  left to review.
 - A model could in principle split or merge real words (`in to`/`into`).
   The new check accepts that. No case has been seen; if one turns up,
   `gloss_rejects.json` won't catch it (it now passes), so the only place
