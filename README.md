@@ -56,7 +56,9 @@ work whose output can be checked, and nothing else.
 - Where it does generate prose, it's **guarded**. The glossator must return
   the paragraph's body text verbatim and in full; a paragraph that fails
   the check falls back to the deterministic verbatim weave rather than
-  shipping something plausible.
+  shipping something plausible. The rejected response is kept in the work
+  dir's `gloss_rejects.json`, so a near miss can be judged by eye instead
+  of paid for twice.
 - Where the evidence is genuinely ambiguous, it
   **abstains and says where to look**. A siglum paired with two authors is
   reported, not resolved. An unconfirmed bibliography house style abstains

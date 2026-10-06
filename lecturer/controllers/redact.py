@@ -106,6 +106,7 @@ class Redact(Controller):
                     cache_path=directory / "gloss_cache.json",
                     synopsis=synopsis,
                     log=self.app.log.info,
+                    rejects_path=directory / "gloss_rejects.json",
                 )
                 script = SeamMender().redact(Script.from_extraction(extraction))
                 stale = glossator.stale_cache_entries(script)

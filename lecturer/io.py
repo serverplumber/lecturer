@@ -101,7 +101,10 @@ def write_review(
         lines.append(
             "Not cached, so a later `redact --llm` run retries (and re-bills) each of "
             "these — worth glossing by hand instead if one keeps failing. Not a "
-            "diagnosis: the reason names what went wrong mechanically, not why.\n"
+            "diagnosis: the reason names what went wrong mechanically, not why. A "
+            "response the faithfulness guard rejected is kept, every attempt, in the "
+            "work dir's `gloss_rejects.json`, next to the paragraph it was checked "
+            "against.\n"
         )
         for paragraph in reverted:
             refs = ", ".join(f"[^{ref}]" for ref in paragraph.refs)

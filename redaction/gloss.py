@@ -139,6 +139,7 @@ class Glossator:
         cache_path: Path | None = None,
         synopsis: str | None = None,
         log: Callable[[str], None] = lambda message: None,
+        rejects_path: Path | None = None,
     ) -> None:
         self.provider = provider
         self._synopsis = synopsis
@@ -146,6 +147,15 @@ class Glossator:
         self._cache: dict[str, list[dict]] = {}
         if cache_path is not None and cache_path.exists():
             self._cache = json.loads(cache_path.read_text())
+        # Responses the faithfulness guard rejected, kept rather than thrown
+        # away: billed output, and most rejects so far trace back to small
+        # mismatches (often bugs upstream, e.g. glued anchors) a human can
+        # judge in seconds. Never consulted as a cache — a reject still
+        # retries — only recorded, keyed like the cache, every attempt kept.
+        self._rejects_path = rejects_path
+        self._rejects: dict[str, dict] = {}
+        if rejects_path is not None and rejects_path.exists():
+            self._rejects = json.loads(rejects_path.read_text())
         self._log = log
         # Billed calls this instance has actually made (cache misses that
         # reached _ask, truncated ones included) — the honest denominator for
@@ -247,7 +257,7 @@ class Glossator:
             self.calls += 1
             # Indexed rather than unpacked: only ``answer[0] is None`` narrows
             # ``answer[1]`` to the failure reason's ``str``.
-            answer = self._ask(section_title, utterance.text, present, context)
+            answer = self._ask(section_title, utterance.text, present, context, key)
             if answer[0] is None:
                 self.reverted.append(
                     RevertedParagraph(
@@ -272,12 +282,15 @@ class Glossator:
         paragraph: str,
         notes: dict[str, Footnote],
         context: str | None = None,
+        key: str | None = None,
     ) -> tuple[list[dict], None] | tuple[None, str]:
         request = _request_text(section_title, paragraph, notes)
         woven = self.provider.ask(_SYSTEM, request, WovenParagraph, context=context)
         if woven is None:
             return None, "no usable response from the model (truncated, or a schema mismatch)"
         if not _faithful(woven, paragraph):
+            if key is not None:
+                self._keep_reject(key, paragraph, notes, woven)
             return None, "the model's own body text didn't reproduce the paragraph verbatim"
         return [piece.model_dump() for piece in woven.pieces if piece.text.strip()], None
 
@@ -351,6 +364,25 @@ class Glossator:
             sort_keys=True,
         )
         return hashlib.sha256(payload.encode()).hexdigest()
+
+    def _keep_reject(
+        self, key: str, paragraph: str, notes: dict[str, Footnote], woven: WovenParagraph
+    ) -> None:
+        entry = self._rejects.setdefault(
+            key,
+            {
+                "paragraph": paragraph,
+                "notes": {ref: note.text for ref, note in notes.items()},
+                "attempts": [],
+            },
+        )
+        entry["attempts"].append(
+            {"provider": self.provider.label, "pieces": [p.model_dump() for p in woven.pieces]}
+        )
+        if self._rejects_path is not None:
+            partial = self._rejects_path.with_suffix(self._rejects_path.suffix + ".part")
+            partial.write_text(json.dumps(self._rejects, ensure_ascii=False, indent=1))
+            partial.rename(self._rejects_path)
 
     def _save_cache(self) -> None:
         if self._cache_path is not None:

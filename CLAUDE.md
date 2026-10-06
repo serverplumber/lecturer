@@ -576,7 +576,17 @@ something unverifiable, that's the thing to push back on.
   it. Verified with a synthetic provider exercising both failure modes plus
   a genuinely faithful success in the same run: exactly the two failures
   land in `reverted` with the right reasons, the successful paragraph is
-  cached and does not appear.
+  cached and does not appear. The rejected response itself is now kept too,
+  in the work dir's `gloss_rejects.json` (keyed like `gloss_cache.json`;
+  the paragraph, its notes, and every rejected attempt's pieces) — written
+  through by `Glossator._keep_reject`, never read back as a cache, so
+  retry-on-next-run is unchanged. Previously discarded outright, which lost
+  77 billed responses on `eros_magic`; 19 of those paragraphs held a glued
+  anchor (`Bogomils[^n37]into`) that `_faithful`'s anchor-stripped source
+  turned into `Bogomilsinto`, so the model's correct `Bogomils into` failed
+  — an extraction bug, not the model (3 more are glued in the book itself,
+  before a dash or bracket, so their cause is still unknown). Only a
+  faithfulness reject has output to keep; an unusable response has none.
 - `recitation/` — speaks the script (`--speak`): `Reciter` strategy
   protocol, one WAV per section into the work dir's `audio/`.
   `KokoroReciter` runs Kokoro-82M via kokoro-onnx (pure wheels, CPU ~4×
@@ -657,8 +667,10 @@ something unverifiable, that's the thing to push back on.
   overwritten, recording that run's real input/output tokens, billed-call
   count, truncated-call count, provider label, and timestamp — the ground
   truth `estimate-gloss` extrapolates a per-paragraph output average from,
-  since there's no API for predicting a call's output size ahead of time.
-  Each work dir contains a self-ignoring `.gitignore`.
+  since there's no API for predicting a call's output size ahead of time —
+  and, once the faithfulness guard has rejected a response,
+  `gloss_rejects.json` (every rejected attempt, kept for review, never read
+  back as a cache). Each work dir contains a self-ignoring `.gitignore`.
 
 ## Commands
 
