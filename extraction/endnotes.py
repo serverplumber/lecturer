@@ -11,7 +11,7 @@ import re
 
 from bs4 import BeautifulSoup
 
-from extraction.base import Footnote
+from extraction.base import Footnote, noteref_marker
 
 _NOTES_HEADING = re.compile(r"^(?:end)?notes$", re.IGNORECASE)
 _NOTE_START = re.compile(r"^(\d+)\.?\s+(.*)", re.DOTALL)
@@ -46,7 +46,7 @@ def pull_endnotes(soups: list[BeautifulSoup]) -> list[Footnote]:
             number = sup.get_text(strip=True)
             note = notes.get((section, number))
             if note is not None:
-                sup.replace_with(f"[^{note.ref}]")
+                sup.replace_with(noteref_marker(note.ref, sup.get_text()))
     return list(notes.values())
 
 

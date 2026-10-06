@@ -89,29 +89,41 @@ something unverifiable, that's the thing to push back on.
   heading element) and takes the `<p>`/`<li>` siblings after it, merging
   one that doesn't end in terminal punctuation into the previous entry — a
   source line-wrap the conversion turned into a paragraph break, the same
-  call `SeamMender` makes for prose torn by a page break. Chapter splitting
-  reads the book's own navigation tree (`_nav_leaves`) rather than the
-  spine alone: the spine only gives file order, and this corpus's EPUBs
-  nest three navPoints deep (Part > numbered chapter), so only leaf
-  navPoints become sections — a Part-level entry would otherwise swallow
-  every chapter under it into one section spanning several. Read from the
-  NCX the spine's `toc` attribute names; an EPUB3 nav document isn't parsed
-  yet, since neither validated EPUB (both Calibre/EPUB2 productions)
-  declares one. A leaf's fragment can land mid-file — one Couliano EPUB
-  packs three chapters and its bibliography into a single physical file,
-  fragment-addressed — so a file's own top-level blocks are cut at
-  whichever block carries that fragment's id, not just at file boundaries.
-  A file with no leaf of its own (a chapter Calibre split across several
-  physical files, the nav pointing only at the first) continues whichever
-  section is still open rather than becoming spurious back matter; only
-  content past the very last leaf earns that label — the earlier version of
-  this routed _any_ untargeted file to back matter once one leaf had been
-  seen, silently moving a third of some chapters' own footnote-bearing text
-  there. Verified against Couliano's _Eros and Magic_ and
-  _I miti dei dualismi occidentali_: each section's own footnote markers
-  summed to the same book-wide total `pull_endnotes` finds (492 of 493 —
-  the one gap is a pre-existing unpaired note predating this change, not
-  investigated further), and dropping `linear="no"` spine items (a
+  call `SeamMender` makes for prose torn by a page break. Footnote anchors
+  become `[^ref]` markers through `base.py`'s `noteref_marker`, at all
+  three replacement sites (`epub.py`'s two, `endnotes.py`'s bare-`<sup>`
+  one): some markup keeps the word space _inside_ the anchor
+  (`Bogomils<sup>37 </sup>into`), and replacing the anchor wholesale glued
+  the words (`Bogomils[^n37]into`). That whitespace is re-emitted after the
+  marker, never before, since redaction's `ANCHOR` swallows whitespace in
+  front of a marker. Found through the glossator, not by reading output:
+  `_faithful` strips anchors from the source, got `Bogomilsinto`, and
+  rejected the model's correct `Bogomils into` — 19 of `eros_magic`'s 77
+  rejects. Verified across all 9 corpus EPUBs: identical footnote counts,
+  only spaces after markers changed, only `eros_magic` affected (31 glued
+  anchors to 6, the 6 glued in the book itself before a dash or bracket).
+  Chapter splitting reads the book's own navigation tree (`_nav_leaves`)
+  rather than the spine alone: the spine only gives file order, and this
+  corpus's EPUBs nest three navPoints deep (Part > numbered chapter), so
+  only leaf navPoints become sections — a Part-level entry would otherwise
+  swallow every chapter under it into one section spanning several. Read
+  from the NCX the spine's `toc` attribute names; an EPUB3 nav document
+  isn't parsed yet, since neither validated EPUB (both Calibre/EPUB2
+  productions) declares one. A leaf's fragment can land mid-file — one
+  Couliano EPUB packs three chapters and its bibliography into a single
+  physical file, fragment-addressed — so a file's own top-level blocks are
+  cut at whichever block carries that fragment's id, not just at file
+  boundaries. A file with no leaf of its own (a chapter Calibre split
+  across several physical files, the nav pointing only at the first)
+  continues whichever section is still open rather than becoming spurious
+  back matter; only content past the very last leaf earns that label — the
+  earlier version of this routed _any_ untargeted file to back matter once
+  one leaf had been seen, silently moving a third of some chapters' own
+  footnote-bearing text there. Verified against Couliano's _Eros and Magic_
+  and _I miti dei dualismi occidentali_: each section's own footnote
+  markers summed to the same book-wide total `pull_endnotes` finds (492 of
+  493 — the one gap is a pre-existing unpaired note predating this change,
+  not investigated further), and dropping `linear="no"` spine items (a
   redundant cover page, and the interactive nav document itself — its own
   `<li>` list would otherwise read as body paragraphs) keeps two
   near-duplicate blobs out of the running text. Front matter still

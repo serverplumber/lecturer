@@ -25,6 +25,7 @@ from extraction.base import (
     Footnote,
     Metadata,
     Section,
+    noteref_marker,
 )
 from extraction.endnotes import pull_endnotes
 
@@ -272,7 +273,7 @@ def _mark_noterefs(soup: BeautifulSoup) -> None:
     """Replace footnote anchors with ``[^ref]`` markers tying them to their notes."""
     for anchor in soup.find_all(lambda tag: bool(_semantic_types(tag) & _NOTEREF_TYPES)):
         ref = _attr(anchor, "href").rpartition("#")[2]
-        anchor.replace_with(f"[^{ref}]")
+        anchor.replace_with(noteref_marker(ref, anchor.get_text()))
 
 
 def _resolve_href(path: str, href: str) -> tuple[str, str] | None:
@@ -424,7 +425,7 @@ def _pull_href_footnotes(paths: list[str], soups: list[BeautifulSoup]) -> list[F
         footnotes.append(Footnote(ref=note_id, text=container.get_text(" ", strip=True)))
         container.extract()
         anchor = by_effective_id[(ref_path, ref_id)]
-        anchor.replace_with(f"[^{note_id}]")
+        anchor.replace_with(noteref_marker(note_id, anchor.get_text()))
     return footnotes
 
 

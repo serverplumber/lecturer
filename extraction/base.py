@@ -10,6 +10,20 @@ from typing import Protocol
 BIBLIOGRAPHY_TITLE = re.compile(r"bibliography|works cited|\breferences\b", re.I)
 
 
+def noteref_marker(ref: str, anchor_text: str) -> str:
+    """The ``[^ref]`` marker replacing an anchor whose own text was ``anchor_text``.
+
+    Markup sometimes keeps the word-separating space inside the anchor
+    (``Bogomils<sup>37 </sup>into``), so replacing the anchor wholesale
+    would glue the two words together. That whitespace is re-emitted after
+    the marker whichever side it sat on: the redaction layers' ``ANCHOR``
+    swallows whitespace *before* a marker, so only a space after it
+    survives the marker's removal.
+    """
+    spaced = anchor_text[:1].isspace() or anchor_text[-1:].isspace()
+    return f"[^{ref}]" + (" " if spaced else "")
+
+
 @dataclass
 class Metadata:
     """Best-effort bibliographic facts about the source document, for tagging audio.
