@@ -33,10 +33,10 @@ oversight.
 ## New test-suite infra needed (repo currently has none)
 
 - No `tests/` dir, no `pytest` anywhere in `pyproject.toml`
-  (`[dependency-groups] dev` currently only has `pre-commit`, `ruff`). Add
+  (`[dependency-groups] dev` currently has `pre-commit`, `ruff`, `ty`). Add
   `pytest>=8` to `dev`.
-- `justfile` has `setup`/`lint`/`fmt`/`check`/`run` recipes but no `test` —
-  add one (`test: uv run pytest`), same shape as the others.
+- `justfile` has `setup`/`lint`/`fmt`/`typecheck`/`check`/`run` recipes but
+  no `test` — add one (`test: uv run pytest`), same shape as the others.
 - `tests/` layout: `tests/conftest.py`, `tests/test_workdir.py`,
   `tests/test_cli.py`, `tests/fixtures/` (see below). No test in this spec
   needs `redaction`/`extraction`/ `recitation` internals mocked out —

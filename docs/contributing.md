@@ -4,7 +4,7 @@
 
 ```sh
 just setup   # uv sync, install commit hooks, provision lecturer.conf
-just check   # lint + format, same as the commit hooks
+just check   # lint, format, type-check — same as the commit hooks
 ```
 
 `just setup` copies `lecturer.conf.example` to `lecturer.conf` the first

@@ -185,11 +185,6 @@ something unverifiable, that's the thing to push back on.
   delivery `Manner`, ready for the TTS. Named for redaction criticism.
   Current layers, in order: `SeamMender` (joins paragraphs torn by page
   breaks), a footnote weaver, `Elocutor` (speaks inline citation
-- `redaction/` — redactional layers (`Redactor`s, applied in order)
-  reworking the extraction into a `Script` of `Utterance`s tagged with a
-  delivery `Manner`, ready for the TTS. Named for redaction criticism.
-  Current layers, in order: `SeamMender` (joins paragraphs torn by page
-  breaks), a footnote weaver, `Elocutor` (speaks inline citation
   abbreviations aloud instead of leaving them for the TTS to mangle — "1
   Cor 2:10" → "First Corinthians two, ten"; a list of `System`s in
   `redaction/elocution/`, one file per abbreviation scheme, each tried in
@@ -217,7 +212,7 @@ something unverifiable, that's the thing to push back on.
   OpenAI-compatible server (Ollama etc.; `--effort high` for gpt-oss). A
   faithfulness guard requires the returned body prose to reproduce the
   paragraph verbatim and in full, letter for letter with whitespace ignored
-  entirely (`docs/planned/whitespace-faithfulness.md`: a listener only
+  entirely (a listener only
   hears word boundaries, and every reject traced to whitespace was the
   model repairing a space lost at a note anchor); guarded or failed
   paragraphs fall back to the verbatim weave. `AnthropicProvider` sends
@@ -303,306 +298,332 @@ something unverifiable, that's the thing to push back on.
   corpus go to four parts. Re-verified against `temple_gates`: 3 more lines
   changed, every one a genuine fix, nothing else moved.
     - `bare_authors.py` — turned out _not_ to be purely document-local
-      after all: whether
-  Cassius Dio needs a work-siglum is a fact about how many works Cassius
-  Dio wrote, not about any one book's own bibliography, so it's the same
-  kind of closed fact `biblical.py`/`stephanus.py` hardcode once rather
-  than re-derive per document. The trigger was Livy — cited bare five times
-  in `temple_gates`' own footnotes, exactly like Cassius Dio, but with _no_
-  separate bibliography entry in this book at all, so `pair_sigla`'s
-  bibliography-gated derivation could never confirm him no matter how many
-  real citations existed. `BARE_AUTHORS` holds both names, each verified
-  against a real citation rather than transcribed from any handbook, and
-  feeds `default_systems()` via `bare_authors_system()` — universal, like
-  every other closed system. `redact()`'s `_bare_author_systems` still runs
-  `sniff_style` → `parse_bibliography` → `pair_sigla` per document, but now
-  only as the supplementary layer for whatever a _specific_ book's own
-  bibliography confirms beyond this closed list, excluding names already in
-  `BARE_AUTHORS` so the two layers don't double up. Re-verified against
-  `temple_gates` after the split: 10 more lines changed, every one a
-  genuine new Livy conversion, Cassius Dio's untouched.
+      after all: whether Cassius Dio needs a work-siglum is a fact about
+      how many works Cassius Dio wrote, not about any one book's own
+      bibliography, so it's the same kind of closed fact
+      `biblical.py`/`stephanus.py` hardcode once rather than re-derive per
+      document. The trigger was Livy — cited bare five times in
+      `temple_gates`' own footnotes, exactly like Cassius Dio, but with
+      _no_ separate bibliography entry in this book at all, so
+      `pair_sigla`'s bibliography-gated derivation could never confirm him
+      no matter how many real citations existed. `BARE_AUTHORS` holds both
+      names, each verified against a real citation rather than transcribed
+      from any handbook, and feeds `default_systems()` via
+      `bare_authors_system()` — universal, like every other closed system.
+      `redact()`'s `_bare_author_systems` still runs `sniff_style` →
+      `parse_bibliography` → `pair_sigla` per document, but now only as the
+      supplementary layer for whatever a _specific_ book's own bibliography
+      confirms beyond this closed list, excluding names already in
+      `BARE_AUTHORS` so the two layers don't double up. Re-verified against
+      `temple_gates` after the split: 10 more lines changed, every one a
+      genuine new Livy conversion, Cassius Dio's untouched.
     - `biblical.py` — the SBL Handbook's book sigla: closed, universal,
       hardcoded, no draft
-  needed.
+      needed.
     - `stephanus.py` — Plato's dialogues, cited by Henri Estienne's 1578
-      page+letter
-  pagination rather than any edition's own page numbers. Closed and
-  standard like biblical, so also hardcoded, but its locator shape ("364b",
-  "514a2", ranges like "364b–365a") is different enough from the dotted
-  default that it supplies its own (`base.py`'s
-  `STEPHANUS_LOCATOR`/`stephanus_locator`). Its "Apol." (Plato's _Apology_)
-  is the reason the shape-based disambiguation above exists: the classical
-  citations in this corpus already use "Apol." for a patristic Apology
-  under the dotted locator, so the two need to coexist under the same
-  siglum without either being dropped once classical's table grows to
-  include it.
+      page+letter pagination rather than any edition's own page numbers.
+      Closed and standard like biblical, so also hardcoded, but its locator
+      shape ("364b", "514a2", ranges like "364b–365a") is different enough
+      from the dotted default that it supplies its own (`base.py`'s
+      `STEPHANUS_LOCATOR`/`stephanus_locator`). Its "Apol." (Plato's
+      _Apology_) is the reason the shape-based disambiguation above exists:
+      the classical citations in this corpus already use "Apol." for a
+      patristic Apology under the dotted locator, so the two need to
+      coexist under the same siglum without either being dropped once
+      classical's table grows to include it.
     - `classical.py` — the heterogeneous Latin author-work abbreviations
-      ("Or." → "Oration",
-  "Ann." → "Annals", ...). Open-vocabulary, so past its one hand-verified
-  seed ("Num" for Plutarch's _Numa_, listed first in `default_systems()` so
-  it wins the tie against biblical's Numbers) the real table is grown
-  externally, in `redaction/elocution/ canon.py`'s two tiers, rather than
-  by further hand-editing this module: tier 1
-  (`elocution_dir/classical_sigla.toml` — this machine's shared canon,
-  valid for every book) and tier 2 (`<work dir>/classical_sigla.toml` —
-  this one document's own entries). Both TOML, both for the same reason: an
-  entry can carry a real comment recording _why_, the same provenance the
-  closed tables keep inline, rather than splitting formats because tier 2
-  is also tooling-written — `promote-classical` (below) already proves
-  `tomlkit` writes TOML programmatically, comments and all, so there was
-  never a principled reason to keep tier 2 on JSON once it needed to carry
-  that kind of provenance too. Precedence is seed < tier 1 < tier 2; only
-  `promote-classical` ever writes tier 1, additively, never touching a
-  siglum it already has. `elocution_dir` is ordinary Cement config
-  (`[lecturer] elocution_dir`, or `LECTURER_ELOCUTION_DIR`), defaulting to
-  `~/.config/lecturer/ elocution` so a real install needs no setup — see
-  `docs/contributing.md` for the repo-local dev override that keeps a
-  checkout's own canon from silently sharing state with an installed copy
-  on the same machine.
+      ("Or." → "Oration", "Ann." → "Annals", ...). Open-vocabulary, so past
+      its one hand-verified seed ("Num" for Plutarch's _Numa_, listed first
+      in `default_systems()` so it wins the tie against biblical's Numbers)
+      the real table is grown externally, in
+      `redaction/elocution/canon.py`'s two tiers, rather than by further
+      hand-editing this module: tier 1
+      (`elocution_dir/classical_sigla.toml` — this machine's shared canon,
+      valid for every book) and tier 2 (`<work dir>/classical_sigla.toml` —
+      this one document's own entries). Both TOML, both for the same
+      reason: an entry can carry a real comment recording _why_, the same
+      provenance the closed tables keep inline, rather than splitting
+      formats because tier 2 is also tooling-written — `promote-classical`
+      (below) already proves `tomlkit` writes TOML programmatically,
+      comments and all, so there was never a principled reason to keep tier
+      2 on JSON once it needed to carry that kind of provenance too.
+      Precedence is seed < tier 1 < tier 2; only `promote-classical` ever
+      writes tier 1, additively, never touching a siglum it already has.
+      `elocution_dir` is ordinary Cement config
+      (`[lecturer] elocution_dir`, or `LECTURER_ELOCUTION_DIR`), defaulting
+      to `~/.config/lecturer/elocution` so a real install needs no setup —
+      see `docs/contributing.md` for the repo-local dev override that keeps
+      a checkout's own canon from silently sharing state with an installed
+      copy on the same machine.
     - `draft-classical`/`promote-classical`
-      (`redaction/elocution/draft.py`, `canon.py`) —
-  `draft-classical` seeds tier 2 by reusing `citation_pairing.py`'s
-  `pair_sigla`: computed there already, but until now only its
-  `siglum is None` (bare-author) rows were used, the `siglum is not None`
-  rows are candidates here, excluding any siglum a system already resolves
-  (covers Josephus/Philo's own dedicated tables for free, since their sigla
-  are already in the merged set) and any siglum `pair_sigla`'s own
-  `collisions()` flags ambiguous. The LLM's only job is expanding an
-  already-confirmed author+siglum pair into a spoken title ("AJ" → "Jewish
-  Antiquities") — narrower and safer than guessing authorship, exactly the
-  boundary this file and `citation_pairing.py` were originally written to
-  describe before either was built. A siglum that stays unresolved —
-  genuinely ambiguous, or the model wasn't confident — isn't dropped: it's
-  written into tier 2 as a **stub**, no `spoken` key (so `canon.py`'s
-  loader ignores it exactly as if it weren't there) but a real TOML comment
-  recording why, plus a `bibliography` hint pulled verbatim from this
-  document's own confirmed primary-source entries naming the candidate
-  author(s). A stub is the one thing a later, more confident run is allowed
-  to overwrite without a human editing it first; two stubs never replace
-  each other, so a hint stays stable rather than churning every run.
-  `promote-classical` copies only `spoken` into tier 1 — a stub's own
-  `note`/`candidates`/`bibliography` are this document's scratch context,
-  not a fact about the siglum worth keeping once resolved. Verified end to
-  end against a real re-extraction of `temple_gates`: 27 real candidates,
-  correctly withholding "Ann." (Tacitus 13x vs. Suetonius 1x — the same
-  collision `citation_pairing.py`'s own bullet below already confirmed a
-  genuine citation slip in the book, not a scanner bug). Left as an open
-  stub in tier 2 regardless: a document's own earlier note concluding
-  _which_ author is right is exactly the kind of judgement
-  `draft-classical` and `promote-classical` are built to leave to a human
-  rather than apply automatically — the stub's `locators`
-  (`docs/classical-sigla.md`) are there so whoever makes that call can go
-  verify it against the book itself first. Two separate real model runs
-  resolved 25 then 2 more (additive, nothing overwritten); promoted into
-  `classical_sigla.toml`, idempotent on a second promote; and
-  `default_systems(elocution_dir=...)` actually speaking a promoted entry
-  through `Elocutor` ("Suetonius, Ner. 49.2" → "Suetonius, Nero forty-nine,
-  two"). Surfaced along the way, fixed, unrelated to this feature
-  specifically: `AnthropicProvider.ask` sent
-  `thinking={"type": "adaptive"}` unconditionally, and Haiku 4.5 — the
-  default cheap tier every draft sweep here uses (`draft-lexicon`,
-  `TongueInterpreter`, `draft-classical`) — rejects it outright; now an
-  instance-level fallback (optimistic on the first call, retries once
-  without thinking on that specific error, stays off after) rather than a
-  model-name list that would only go stale. See `docs/classical-sigla.md`
-  for the walkthrough.
-    - **Still to come**: Bekker numbering and Diels-Kranz are further
-      closed, enumerable
-  systems of the same shape as biblical/Stephanus once they show up outside
-  footnotes. Units (SAE vs SI collisions) are parked until citation
-  dictation's systems are mature enough to tell whether the same machinery
-  generalises or the two need separate treatment.
+      (`redaction/elocution/draft.py`, `canon.py`) — `draft-classical`
+      seeds tier 2 by reusing `citation_pairing.py`'s `pair_sigla`:
+      computed there already, but until now only its `siglum is None`
+      (bare-author) rows were used, the `siglum is not None` rows are
+      candidates here, excluding any siglum a system already resolves
+      (covers Josephus/Philo's own dedicated tables for free, since their
+      sigla are already in the merged set) and any siglum `pair_sigla`'s
+      own `collisions()` flags ambiguous. The LLM's only job is expanding
+      an already-confirmed author+siglum pair into a spoken title ("AJ" →
+      "Jewish Antiquities") — narrower and safer than guessing authorship,
+      exactly the boundary this file and `citation_pairing.py` were
+      originally written to describe before either was built. A siglum that
+      stays unresolved — genuinely ambiguous, or the model wasn't confident
+      — isn't dropped: it's written into tier 2 as a **stub**, no `spoken`
+      key (so `canon.py`'s loader ignores it exactly as if it weren't
+      there) but a real TOML comment recording why, plus a `bibliography`
+      hint pulled verbatim from this document's own confirmed
+      primary-source entries naming the candidate author(s). A stub is the
+      one thing a later, more confident run is allowed to overwrite without
+      a human editing it first; two stubs never replace each other, so a
+      hint stays stable rather than churning every run. `promote-classical`
+      copies only `spoken` into tier 1 — a stub's own
+      `note`/`candidates`/`bibliography` are this document's scratch
+      context, not a fact about the siglum worth keeping once resolved.
+      Verified end to end against a real re-extraction of `temple_gates`:
+      27 real candidates, correctly withholding "Ann." (Tacitus 13x vs.
+      Suetonius 1x — the same collision `citation_pairing.py`'s own bullet
+      below already confirmed a genuine citation slip in the book, not a
+      scanner bug). Left as an open stub in tier 2 regardless: a document's
+      own earlier note concluding _which_ author is right is exactly the
+      kind of judgement `draft-classical` and `promote-classical` are built
+      to leave to a human rather than apply automatically — the stub's
+      `locators` (`docs/classical-sigla.md`) are there so whoever makes
+      that call can go verify it against the book itself first. Two
+      separate real model runs resolved 25 then 2 more (additive, nothing
+      overwritten); promoted into `classical_sigla.toml`, idempotent on a
+      second promote; and `default_systems(elocution_dir=...)` actually
+      speaking a promoted entry through `Elocutor` ("Suetonius, Ner. 49.2"
+      → "Suetonius, Nero forty-nine, two"). Surfaced along the way, fixed,
+      unrelated to this feature specifically: `AnthropicProvider.ask` sent
+      `thinking={"type": "adaptive"}` unconditionally, and Haiku 4.5 — the
+      default cheap tier every draft sweep here uses (`draft-lexicon`,
+      `TongueInterpreter`, `draft-classical`) — rejects it outright; now an
+      instance-level fallback (optimistic on the first call, retries once
+      without thinking on that specific error, stays off after) rather than
+      a model-name list that would only go stale. See
+      `docs/classical-sigla.md` for the walkthrough.
+    - `philo.py`, `josephus.py` — SBL §8.3.6/§8.3.7 tables, closed and
+      hardcoded on the dotted locator. Philo deliberately omits bare
+      "Leg.": this corpus cites three different works under it with the
+      same locator shape, which shape-based disambiguation can't separate.
+    - `diels_kranz.py` — the Presocratics' "DK 31 B112" (chapter, A/B,
+      item); one siglum, its own locator shape (`base.py`'s
+      `DIELS_KRANZ_LOCATOR`). Verified against 24 citations in Kingsley's
+      _Ancient Philosophy, Mystery, and Magic_; the 3 that don't convert
+      are listed in the module's TODO.
+    - `pseudepigrapha.py` — SBL §8.3.4, typed in by hand rather than
+      transcribed from SBL's compilation; the module docstring records the
+      cleanup it needed (cross-reference entries resolved to their
+      targets, parenthetical glosses dropped from the spoken form).
+    - `qumran.py` — a `PatternSystem`, not a table: "4Q246" is read
+      call-sign style, a named scroll ("1QH", "4QMMT") by name, copy
+      letters spoken capitalised; the Damascus Document ("CD") is a plain
+      `System` alongside it. Verified against 105 citations across Collins
+      and deClaisse-Walford.
+    - **Still to come**: Bekker numbering, a further closed system of the
+      same shape as biblical/Stephanus, once it shows up outside
+      footnotes. Units (SAE vs SI collisions) are parked until citation
+      dictation's systems are mature enough to tell whether the same
+      machinery generalises or the two need separate treatment.
     - `bibliography.py` — turns extraction's raw, geometry-segmented
-      `BibliographyEntry`
-  list into structure: `authors`, `role` (ed./eds., an editor's names still
-  belong in `authors`), `translator` (a "Pausanias, trans. X" entry's
-  translator is not any kind of author of the work, so it gets its own
-  field — `authors` is left empty rather than misattributed), `title`,
-  `container` (journal siglum, or the book a chapter is _in_), `editors`,
-  `year`, `pages` — one dataclass, one parser, one module, per
-  `docs/elocution.md`'s Pass 0/1, rather than split across per-component
-  files: no database or service boundary here justifies carving up one
-  parsing job over one list of strings. `sniff_style` confirms (never
-  assumes) the corpus's one validated house style — Chicago/SBL
-  notes-bibliography, year at the entry's tail — before the parser runs at
-  all; author-date's year-after-author, or anything else unconfirmed,
-  abstains every entry to raw `text` rather than mis-parsing a shape this
-  project has never tested against. Confirmation needs _coverage_, not just
-  an absolute count: validated against a second real bibliography
-  (Couliano's _Tree of Gnosis_, a different house style entirely), an early
-  version of the gate misfired — 5 of 288 entries happened to parse as
-  tail-year, clearing the absolute threshold while the other 283 went
-  unmeasured and unrecognized. Fixed by requiring the tail-year signal to
-  cover a real fraction of the whole entry list (`_MIN_COVERAGE`), which
-  separates the two corpora (63.9% vs. 1.7%) where the ratio among only the
-  entries that parsed couldn't (~99% for both). The same-author
-  continuation marker is also fully sniffed, never hardcoded: three real
-  corpora have shown three different markers (temple_gates' typeset em dash
-  "———.", _Tree of Gnosis_'s double hyphen "--,", Couliano's
-  _Eros and Magic_'s single hyphen "-.") — both the character and the run
-  length are read off the document, not assumed to be an em dash repeated
-  three times. Every field is best-effort and `text` is always kept
-  verbatim regardless. `classify_sources` classifies each parsed entry
-  primary (ancient) vs. secondary (modern) — HEU feature scoring, not
-  identity resolution, from structural signals verified against real
-  bibliographies rather than assumed: a non-empty `translator` (fronts a
-  modern name but presents someone else's work as a translation — `authors`
-  is already empty for these) is strong enough alone. A bare/natural-order
-  first author (no comma — "Cassius Dio" rather than a modern scholar's
-  "Surname, First") is **not** strong enough alone, even though it looked
-  that way against the first validated corpus: a second real one
-  (Couliano's _Eros and Magic_) turned up "Faust. Cahiers de
-  l'Hermétisme..." and "Soleil. Le Soleil à la Renaissance...", where the
-  bare capitalized word is the print bibliography's own filing keyword for
-  an anonymous themed collection, not a person. It now needs corroboration
-  from a modern edition apparatus — a known ancient-text series (`LCL`,
-  `Loeb Classical Library`, `Ancient Christian Writers`) or a "Translated
-  by"/"Edited by" credit anywhere in the entry's own text (checked as raw
-  text, since those fields are only structurally populated for specific
-  entry shapes and "Translated by Earnest Cary" sits mid-entry in a plain
-  "Author. Title." bare-name entry) — every genuine bare-name entry in both
-  validated corpora carries one or the other, since an ancient text only
-  reaches a modern bibliography through a modern edition or translation.
-  The apparatus signal alone still isn't enough, precisely because of the
-  original counterexample (a modern "Introduction" essay published _inside_
-  a Loeb-adjacent volume, correctly left secondary). This is the foundation
-  `draft-classical`'s LLM sweep reads from, via `citation_pairing.py`'s
-  `pair_sigla` below.
+      `BibliographyEntry` list into structure: `authors`, `role` (ed./eds.,
+      an editor's names still belong in `authors`), `translator` (a
+      "Pausanias, trans. X" entry's translator is not any kind of author of
+      the work, so it gets its own field — `authors` is left empty rather
+      than misattributed), `title`, `container` (journal siglum, or the
+      book a chapter is _in_), `editors`, `year`, `pages` — one dataclass,
+      one parser, one module, per `docs/elocution.md`'s Pass 0/1, rather
+      than split across per-component files: no database or service
+      boundary here justifies carving up one parsing job over one list of
+      strings. `sniff_style` confirms (never assumes) the corpus's one
+      validated house style — Chicago/SBL notes-bibliography, year at the
+      entry's tail — before the parser runs at all; author-date's
+      year-after-author, or anything else unconfirmed, abstains every entry
+      to raw `text` rather than mis-parsing a shape this project has never
+      tested against. Confirmation needs _coverage_, not just an absolute
+      count: validated against a second real bibliography (Couliano's
+      _Tree of Gnosis_, a different house style entirely), an early version
+      of the gate misfired — 5 of 288 entries happened to parse as
+      tail-year, clearing the absolute threshold while the other 283 went
+      unmeasured and unrecognized. Fixed by requiring the tail-year signal
+      to cover a real fraction of the whole entry list (`_MIN_COVERAGE`),
+      which separates the two corpora (63.9% vs. 1.7%) where the ratio
+      among only the entries that parsed couldn't (~99% for both). The
+      same-author continuation marker is also fully sniffed, never
+      hardcoded: three real corpora have shown three different markers
+      (temple_gates' typeset em dash "———.", _Tree of Gnosis_'s double
+      hyphen "--,", Couliano's _Eros and Magic_'s single hyphen "-.") —
+      both the character and the run length are read off the document, not
+      assumed to be an em dash repeated three times. Every field is
+      best-effort and `text` is always kept verbatim regardless.
+      `classify_sources` classifies each parsed entry primary (ancient) vs.
+      secondary (modern) — HEU feature scoring, not identity resolution,
+      from structural signals verified against real bibliographies rather
+      than assumed: a non-empty `translator` (fronts a modern name but
+      presents someone else's work as a translation — `authors` is already
+      empty for these) is strong enough alone. A bare/natural-order first
+      author (no comma — "Cassius Dio" rather than a modern scholar's
+      "Surname, First") is **not** strong enough alone, even though it
+      looked that way against the first validated corpus: a second real one
+      (Couliano's _Eros and Magic_) turned up "Faust. Cahiers de
+      l'Hermétisme..." and "Soleil. Le Soleil à la Renaissance...", where
+      the bare capitalized word is the print bibliography's own filing
+      keyword for an anonymous themed collection, not a person. It now
+      needs corroboration from a modern edition apparatus — a known
+      ancient-text series (`LCL`, `Loeb Classical Library`,
+      `Ancient Christian Writers`) or a "Translated by"/"Edited by" credit
+      anywhere in the entry's own text (checked as raw text, since those
+      fields are only structurally populated for specific entry shapes and
+      "Translated by Earnest Cary" sits mid-entry in a plain "Author.
+      Title." bare-name entry) — every genuine bare-name entry in both
+      validated corpora carries one or the other, since an ancient text
+      only reaches a modern bibliography through a modern edition or
+      translation. The apparatus signal alone still isn't enough, precisely
+      because of the original counterexample (a modern "Introduction" essay
+      published _inside_ a Loeb-adjacent volume, correctly left secondary).
+      This is the foundation `draft-classical`'s LLM sweep reads from, via
+      `citation_pairing.py`'s `pair_sigla` below.
     - `citation_pairing.py` — a document's own author-siglum vocabulary,
-      read off its
-  footnotes rather than aligned from bibliography titles.
-  `docs/elocution.md`'s `truncation_aligner` (component 6) assumed a
-  bibliography entry's title text could be aligned against a footnote's
-  abbreviation; this corpus's primary sources are collected Loeb-style
-  entries with no per-work title to align against, so that never had
-  anything to work from. What works instead: a citation already names its
-  author in full right next to the siglum ("Josephus, AJ 18.81–84",
-  "Tacitus, Ann. 2.32") — `pair_sigla` counts every (author, siglum)
-  pairing the footnotes' own text supplies, gated on `bibliography.py`'s
-  confirmed `is_primary_source` authors so no name is ever guessed, only
-  read, and keeps a capped sample (three) of `Citation`s (footnote `ref` +
-  the citation's own locator) per pairing — not for identity, already
-  settled, but so a human checking a `draft-classical` stub can go find the
-  actual occurrence rather than trust a bare count. `ref` alone is already
-  a direct grep target against `sections/*.footnotes.txt` in this corpus,
-  which numbers footnotes by page (`[^p70-n105]`) rather than restarting
-  per chapter. An author cited with no siglum at all ("Livy, 1.36.2–6") is
-  itself a real result — one work, nothing to abbreviate. `collisions`
-  flags a siglum paired with more than one author in this document rather
-  than silently keeping whichever it saw last; verified against
-  `temple_gates`, the one collision it caught ("Ann." — Tacitus and
-  Suetonius) turned out to be a genuine citation slip in the book itself,
-  not a scanner bug — still left for a human, not resolved here or by
-  `draft-classical` below, since which of the two is right is exactly the
-  judgement call `collisions()` exists to hand off rather than guess. Wired
-  up by `draft-classical` (above): every other pairing here — one where
-  `pair_sigla` paired exactly one author with a siglum — is a candidate for
-  turning that siglum into a spoken expansion ("AJ" → "Jewish
-  Antiquities"), a narrower, lower-risk LLM ask than guessing authorship,
-  since the author side is already settled here.
+      read off its footnotes rather than aligned from bibliography titles.
+      `docs/elocution.md`'s `truncation_aligner` (component 6) assumed a
+      bibliography entry's title text could be aligned against a footnote's
+      abbreviation; this corpus's primary sources are collected Loeb-style
+      entries with no per-work title to align against, so that never had
+      anything to work from. What works instead: a citation already names
+      its author in full right next to the siglum ("Josephus, AJ 18.81–84",
+      "Tacitus, Ann. 2.32") — `pair_sigla` counts every (author, siglum)
+      pairing the footnotes' own text supplies, gated on
+      `bibliography.py`'s confirmed `is_primary_source` authors so no name
+      is ever guessed, only read, and keeps a capped sample (three) of
+      `Citation`s (footnote `ref` + the citation's own locator) per pairing
+      — not for identity, already settled, but so a human checking a
+      `draft-classical` stub can go find the actual occurrence rather than
+      trust a bare count. `ref` alone is already a direct grep target
+      against `sections/*.footnotes.txt` in this corpus, which numbers
+      footnotes by page (`[^p70-n105]`) rather than restarting per chapter.
+      An author cited with no siglum at all ("Livy, 1.36.2–6") is itself a
+      real result — one work, nothing to abbreviate. `collisions` flags a
+      siglum paired with more than one author in this document rather than
+      silently keeping whichever it saw last; verified against
+      `temple_gates`, the one collision it caught ("Ann." — Tacitus and
+      Suetonius) turned out to be a genuine citation slip in the book
+      itself, not a scanner bug — still left for a human, not resolved here
+      or by `draft-classical` below, since which of the two is right is
+      exactly the judgement call `collisions()` exists to hand off rather
+      than guess. Wired up by `draft-classical` (above): every other
+      pairing here — one where `pair_sigla` paired exactly one author with
+      a siglum — is a candidate for turning that siglum into a spoken
+      expansion ("AJ" → "Jewish Antiquities"), a narrower, lower-risk LLM
+      ask than guessing authorship, since the author side is already
+      settled here.
     - **Citation review** — every abstain-over-guess layer above still
-      needs a way to tell a
-  human "look here," not just silently leave text unconverted. `Elocutor`
-  now scans its own input (both utterance text and, for the `book` variant,
-  notes `NoteDropper` left on `section.footnotes` rather than folding into
-  utterances — the only weaver that leaves citations Elocutor's
-  substitution pass never touches) for a known siglum sitting next to
-  something locator-ish — a digit immediately glued on, or a couple of
-  separator characters away — that the strict merged pattern didn't accept.
-  Not a diagnosis: it reports _where_, with enough surrounding context to
-  read _why_ off the text, not a guess at which of several possible causes
-  (missing space, OCR noise, an uncovered locator shape, a genuine siglum
-  collision) applies — the same posture as every abstain above.
-  `PatternSystem` (Qumran) is skipped: a generative shape has no fixed
-  siglum to scan for in the first place. `lecturer.py`'s `write_review`
-  writes the result to `redactions/<variant>/review.md` — `.md`, not
-  `.txt`, so `read_redactions`'s glob never mistakes it for a section —
-  overwritten every run, even to "nothing to review," rather than deleted,
-  so a run with a narrower `systems` set can't make an existing review
-  vanish out from under someone reading it. Verified against two real
-  corpora: Kingsley's _Ancient Philosophy, Mystery, and Magic_ (a blob PDF,
-  so its Diels-Kranz citations sit in running body text rather than
-  footnotes) surfaced 27 spans in a report short enough to read end to end,
-  including the 3 already known from `diels_kranz.py`'s own TODO ("DK47A1"
-  with no space, "DK 21 Bag" and "DK 87 B6o" from OCR digit/letter
-  confusion) — plus a genuinely new pattern, "DK 1. 289.17" and the like:
-  Diels' own volume/page citation shape, distinct from the
-  chapter/letter/item fragment grammar `diels_kranz.py` implements,
-  evidenced but not yet worth building a system for on one corpus alone.
-  `temple_gates` surfaced 21 spans, all one shape:
-  Justin's/Apuleius's/Tertullian's "Apol." and Philo's/Cicero's "Leg." in
-  chapter.section form, losing to Stephanus's identically-spelled
-  "Apol."/"Leg." (Plato's *Apology*/*Laws*, page+letter form) under
-  `_merge`'s priority tie-break — confirming component 9
-  `patristic_sigla`'s gap (`docs/elocution.md`) is a real, evidenced
-  collision in this corpus, not just the hypothetical the
-  shape-disambiguation design doc-comment above uses as its example.
-  Checked for the live-mispronunciation risk this implies (a `Leg.`/`Apol.`
-  locator that _does_ happen to fit Stephanus's page+letter shape would be
-  silently spoken as Plato, invisible to a review that only reports what
-  the pattern rejected): none found in `temple_gates`'s redacted output.
-  Separately, `extraction/pdf.py`'s `_pairing_holds` bail — silently
-  discarding every parsed footnote on an OCR/anchor mismatch — now
-  `warnings.warn`s instead of failing silent, the one bail site destructive
-  enough (whole-document footnote loss) to warrant a warning ahead of
-  citation review's own per-document report.
+      needs a way to tell a human "look here," not just silently leave text
+      unconverted. `Elocutor` now scans its own input (both utterance text
+      and, for the `book` variant, notes `NoteDropper` left on
+      `section.footnotes` rather than folding into utterances — the only
+      weaver that leaves citations Elocutor's substitution pass never
+      touches) for a known siglum sitting next to something locator-ish — a
+      digit immediately glued on, or a couple of separator characters away
+      — that the strict merged pattern didn't accept. Not a diagnosis: it
+      reports _where_, with enough surrounding context to read _why_ off
+      the text, not a guess at which of several possible causes (missing
+      space, OCR noise, an uncovered locator shape, a genuine siglum
+      collision) applies — the same posture as every abstain above.
+      `PatternSystem` (Qumran) is skipped: a generative shape has no fixed
+      siglum to scan for in the first place. `lecturer/io.py`'s
+      `write_review` writes the result to `redactions/<variant>/review.md`
+      — `.md`, not `.txt`, so `read_redactions`'s glob never mistakes it
+      for a section — overwritten every run, even to "nothing to review,"
+      rather than deleted, so a run with a narrower `systems` set can't
+      make an existing review vanish out from under someone reading it.
+      Verified against two real corpora: Kingsley's
+      _Ancient Philosophy, Mystery, and Magic_ (a blob PDF, so its
+      Diels-Kranz citations sit in running body text rather than footnotes)
+      surfaced 27 spans in a report short enough to read end to end,
+      including the 3 already known from `diels_kranz.py`'s own TODO
+      ("DK47A1" with no space, "DK 21 Bag" and "DK 87 B6o" from OCR
+      digit/letter confusion) — plus a genuinely new pattern, "DK 1.
+      289.17" and the like: Diels' own volume/page citation shape, distinct
+      from the chapter/letter/item fragment grammar `diels_kranz.py`
+      implements, evidenced but not yet worth building a system for on one
+      corpus alone. `temple_gates` surfaced 21 spans, all one shape:
+      Justin's/Apuleius's/Tertullian's "Apol." and Philo's/Cicero's "Leg."
+      in chapter.section form, losing to Stephanus's identically-spelled
+      "Apol."/"Leg." (Plato's *Apology*/*Laws*, page+letter form) under
+      `_merge`'s priority tie-break — confirming component 9
+      `patristic_sigla`'s gap (`docs/elocution.md`) is a real, evidenced
+      collision in this corpus, not just the hypothetical the
+      shape-disambiguation design doc-comment above uses as its example.
+      Checked for the live-mispronunciation risk this implies (a
+      `Leg.`/`Apol.` locator that _does_ happen to fit Stephanus's
+      page+letter shape would be silently spoken as Plato, invisible to a
+      review that only reports what the pattern rejected): none found in
+      `temple_gates`'s redacted output. Separately, `extraction/pdf.py`'s
+      `_pairing_holds` bail — silently discarding every parsed footnote on
+      an OCR/anchor mismatch — now `warnings.warn`s instead of failing
+      silent, the one bail site destructive enough (whole-document footnote
+      loss) to warrant a warning ahead of citation review's own
+      per-document report.
     - **Reverted-paragraph review** — the same `review.md` gained a second,
-      independent
-  section for a gap on the glossing side: a paragraph whose model response
-  either wasn't usable or failed `_faithful` falls back to the
-  deterministic verbatim weave (`weave_utterance`) silently — and isn't
-  written to `gloss_cache.json`, so a later `redact --llm` run retries (and
-  re-bills) it every time, forever, with no record of the earlier attempt.
-  Surfaced concretely glossing `eros_magic` for real under
-  `claude-opus-4-8`: `estimate-gloss` kept reporting a nonzero "remaining"
-  count after a complete run (33 of 295 paragraphs, ~11%) with no way to
-  tell which ones or why. `Glossator._ask` now returns `(pieces, reason)`
-  instead of just `pieces` — `reason` names which of the two failure modes
-  happened ("no usable response from the model" vs. "the model's own body
-  text didn't reproduce the paragraph verbatim") — and `_gloss_utterance`
-  records a `RevertedParagraph` (section, footnote refs, reason, a text
-  snippet) instead of just falling back silently. Deliberately a reporting
-  fix only, not a caching-behaviour change: caching the fallback would
-  permanently foreclose a later run's chance for the model to succeed on
-  retry, which is exactly the property that makes the 33-remaining count
-  _honest_ in the first place (`estimate-gloss` already correctly predicts
-  a retry will re-bill these). `lecturer.py`'s `write_review` takes both
-  `near_misses` and `reverted` now and writes them as two `##` sections in
-  one file rather than two files, since both are the same "look here"
-  posture. Persisted on a crash too, not just success — a `ProviderError`
-  mid-run unwinds past `redact()` entirely before `near_misses` even exists
-  (Elocutor runs after weaving), but a Glossator's own `.reverted` list
-  survives the exception unwind exactly like its usage counters do (see the
-  `_persist_gloss_usage` note above), so `_redact_phase`'s
-  `except ProviderError` branch writes `review.md` with `near_misses=[]`
-  and whatever the Glossator collected before the crash, rather than losing
-  it. Verified with a synthetic provider exercising both failure modes plus
-  a genuinely faithful success in the same run: exactly the two failures
-  land in `reverted` with the right reasons, the successful paragraph is
-  cached and does not appear. The rejected response itself is now kept too,
-  in the work dir's `gloss_rejects.json` (keyed like `gloss_cache.json`;
-  the paragraph, its notes, and every rejected attempt's pieces) — written
-  through by `Glossator._keep_reject`, never read back as a cache, so
-  retry-on-next-run is unchanged. Previously discarded outright, which lost
-  77 billed responses on `eros_magic`; 19 of those paragraphs held a glued
-  anchor (`Bogomils[^n37]into`) that `_faithful`'s anchor-stripped source
-  turned into `Bogomilsinto`, so the model's correct `Bogomils into` failed
-  — an extraction bug, not the model (3 more are glued in the book itself,
-  before a dash or bracket, so their cause is still unknown). Only a
-  faithfulness reject has output to keep; an unusable response has none.
-  When the check later grows more tolerant, `Glossator._lookup` replays a
-  kept reject before calling: the first attempt `_faithful` now accepts is
-  cached and the entry leaves the rejects file, with no call made. The
-  replay happens in memory and is written out only by the glossing path, so
-  `estimate-gloss` (whose own `Glossator` must be given `rejects_path` too
-  — missing at first, which made it price two paragraphs `redact` then
-  recovered for free) excludes recovered paragraphs without writing
-  anything. Verified on `ideas_and_ideals`: its 2 remaining rejects
-  (`Johnson[^…]is`, `1619.[^…]Andreae’s`, unspaced in the EPUB's own
-  markup) were recovered by `redact --llm` with no billed call, and
-  `estimate-gloss` then reported nothing left; the estimator fix was
-  verified synthetically, since that real state was used up.
-- `recitation/` — speaks the script (`--speak`): `Reciter` strategy
+      independent section for a gap on the glossing side: a paragraph whose
+      model response either wasn't usable or failed `_faithful` falls back
+      to the deterministic verbatim weave (`weave_utterance`) silently —
+      and isn't written to `gloss_cache.json`, so a later `redact --llm`
+      run retries (and re-bills) it every time, forever, with no record of
+      the earlier attempt. Surfaced concretely glossing `eros_magic` for
+      real under `claude-opus-4-8`: `estimate-gloss` kept reporting a
+      nonzero "remaining" count after a complete run (33 of 295 paragraphs,
+      ~11%) with no way to tell which ones or why. `Glossator._ask` now
+      returns `(pieces, reason)` instead of just `pieces` — `reason` names
+      which of the two failure modes happened ("no usable response from the
+      model" vs. "the model's own body text didn't reproduce the paragraph
+      verbatim") — and `_gloss_utterance` records a `RevertedParagraph`
+      (section, footnote refs, reason, a text snippet) instead of just
+      falling back silently. Deliberately a reporting fix only, not a
+      caching-behaviour change: caching the fallback would permanently
+      foreclose a later run's chance for the model to succeed on retry,
+      which is exactly the property that makes the 33-remaining count
+      _honest_ in the first place (`estimate-gloss` already correctly
+      predicts a retry will re-bill these). `write_review` takes both
+      `near_misses` and `reverted` now and writes them as two `##` sections
+      in one file rather than two files, since both are the same "look
+      here" posture. Persisted on a crash too, not just success — a
+      `ProviderError` mid-run unwinds past `redact()` entirely before
+      `near_misses` even exists (Elocutor runs after weaving), but a
+      Glossator's own `.reverted` list survives the exception unwind
+      exactly like its usage counters do (see the `_persist_gloss_usage`
+      note below), so `_redact_phase`'s `except ProviderError` branch
+      writes `review.md` with `near_misses=[]` and whatever the Glossator
+      collected before the crash, rather than losing it. Verified with a
+      synthetic provider exercising both failure modes plus a genuinely
+      faithful success in the same run: exactly the two failures land in
+      `reverted` with the right reasons, the successful paragraph is cached
+      and does not appear. The rejected response itself is now kept too, in
+      the work dir's `gloss_rejects.json` (keyed like `gloss_cache.json`;
+      the paragraph, its notes, and every rejected attempt's pieces) —
+      written through by `Glossator._keep_reject`, never read back as a
+      cache, so retry-on-next-run is unchanged. Previously discarded
+      outright, which lost 77 billed responses on `eros_magic`; 19 of those
+      paragraphs held a glued anchor (`Bogomils[^n37]into`) that
+      `_faithful`'s anchor-stripped source turned into `Bogomilsinto`, so
+      the model's correct `Bogomils into` failed — an extraction bug, not
+      the model (3 more are glued in the book itself, before a dash or
+      bracket, so their cause is still unknown). Only a faithfulness reject
+      has output to keep; an unusable response has none. When the check
+      later grows more tolerant, `Glossator._lookup` replays a kept reject
+      before calling: the first attempt `_faithful` now accepts is cached
+      and the entry leaves the rejects file, with no call made. The replay
+      happens in memory and is written out only by the glossing path, so
+      `estimate-gloss` (whose own `Glossator` must be given `rejects_path`
+      too — missing at first, which made it price two paragraphs `redact`
+      then recovered for free) excludes recovered paragraphs without
+      writing anything. Verified on `ideas_and_ideals`: its 2 remaining
+      rejects (`Johnson[^…]is`, `1619.[^…]Andreae’s`, unspaced in the
+      EPUB's own markup) were recovered by `redact --llm` with no billed
+      call, and `estimate-gloss` then reported nothing left; the estimator
+      fix was verified synthetically, since that real state was used up.
+- `recitation/` — speaks the script (the `recite` verb): `Reciter` strategy
   protocol, one WAV per section into the work dir's `audio/`.
   `KokoroReciter` runs Kokoro-82M via kokoro-onnx (pure wheels, CPU ~4×
   realtime; model fetched once into `~/.cache/lecturer`). Text is chunked
@@ -650,7 +671,7 @@ something unverifiable, that's the thing to push back on.
   rest are skipped and counted. The work dir's `lexicon.json` gives
   recurring names and terms their pronunciation (`recitation/lexicon.py`):
   `as` respellings, `lang` reroutes, or exact `ipa`, applied at phoneme
-  level; `--lexicon-draft` seeds it with a cheap LLM sweep (never
+  level; `draft-lexicon` seeds it with a cheap LLM sweep (never
   overwriting hand-edits), and audio signatures include per-section lexicon
   digests so editing an entry re-renders only the sections that use it.
 - `texts/` — source monographs (gitignored; copyrighted material).
@@ -670,10 +691,10 @@ something unverifiable, that's the thing to push back on.
   dropped), `glossed` (`--llm`), `verbatim` (`--verbatim-notes`). Within a
   variant, reciter changes (voice, speed) overwrite: each WAV's JSON `.sig`
   sidecar names the reciter and hashes the section's utterances, so re-runs
-  keep unchanged sections, re-synthesise stale ones, and `--publish`
-  follows via mtime; the playlist records the reciter in a comment. Text
-  outputs (`sections/`, `redactions/`) hold whatever the last run produced.
-  A work dir may also carry `lexicon.json` (pronunciation) and
+  keep unchanged sections, re-synthesise stale ones, and `publish` follows
+  via mtime; the playlist records the reciter in a comment. Text outputs
+  (`sections/`, `redactions/`) hold whatever the last run produced. A work
+  dir may also carry `lexicon.json` (pronunciation) and
   `classical_sigla.toml` (this document's own tier-2 sigla,
   `redaction/elocution/canon.py`) — both hand-editable, both grown by a
   `draft-*` verb rather than regenerated wholesale — and, once a real
@@ -694,8 +715,8 @@ Everything routine is in the `justfile`:
 - `just setup` — `uv sync` + install pre-commit hooks + provision
   `lecturer.conf` from `lecturer.conf.example` (once after cloning; never
   overwrites an existing `lecturer.conf`). See `docs/contributing.md`.
-- `just lint` / `just fmt` / `just check` — ruff, same as the commit hooks
-  run.
+- `just lint` / `just fmt` / `just typecheck` / `just check` — ruff and
+  ty, same as the commit hooks run.
 - `just run -o <dir>` — the whole chain to publish, default settings. The
   phases are verbs — `extract` (takes the document; a different one prompts
   before rebuilding from the top), `redact` (weaving + LLM flags),
@@ -706,19 +727,28 @@ Everything routine is in the `justfile`:
   own `classical_sigla.toml` sigla, then graduate one into the shared canon
   — see `docs/classical-sigla.md`). Verbs resolve their own dependencies:
   free phases run on demand, glossing never runs implicitly.
-- `estimate-gloss -o <dir>` — a distinct verb rather than a
-  `redact --estimate` flag, since it doesn't do redaction's job. Loads the
-  pipeline through the same layers `redact --llm` would before the
-  glossator itself runs (`SeamMender`, then the glossator's own
-  `gloss_cache.json` lookup, so already-cached paragraphs cost nothing and
-  are excluded), and prices the rest with `count_tokens` (a free endpoint)
-  for input; output is extrapolated from this book's own
-  `gloss_usage.jsonl` call history, or flagged as unknown on a book's
-  first-ever `--llm` run rather than guessed from another book's numbers.
-  Printed as plain prose, not a table — the actual accessible form for a
-  blind user, who can't glance at a dashboard to sanity-check a run's cost.
-  Anthropic only for v1 (`redaction/estimate.py`): OpenAI has different
-  pricing and no identically-named free token-counting endpoint.
+- `estimate-gloss -o <dir>` — what a `redact --llm` run would still cost,
+  spending nothing; `redact --llm` is gated on the same estimate. See
+  Glossing cost and caching below.
+
+## Glossing cost and caching
+
+How `redact --llm` is priced, gated, cached and accounted for. Each entry
+records the real run that forced it.
+
+- **`estimate-gloss`** — a distinct verb rather than a `redact --estimate`
+  flag, since it doesn't do redaction's job. Loads the pipeline through the
+  same layers `redact --llm` would before the glossator itself runs
+  (`SeamMender`, then the glossator's own `gloss_cache.json` lookup, so
+  already-cached paragraphs cost nothing and are excluded), and prices the
+  rest with `count_tokens` (a free endpoint) for input; output is
+  extrapolated from this book's own `gloss_usage.jsonl` call history, or
+  flagged as unknown on a book's first-ever `--llm` run rather than guessed
+  from another book's numbers. Printed as plain prose, not a table — the
+  actual accessible form for a blind user, who can't glance at a dashboard
+  to sanity-check a run's cost. Anthropic only for v1
+  (`redaction/estimate.py`): OpenAI has different pricing and no
+  identically-named free token-counting endpoint.
   `redaction/providers.py`'s `AnthropicProvider.count_input_tokens` mirrors
   `ask`'s own request construction exactly (system/context/effort/thinking,
   including the adaptive-thinking fallback), so the free count matches what
@@ -735,22 +765,29 @@ Everything routine is in the `justfile`:
   priced with its own extra one-off call (`ensure_synopsis`'s real request,
   truncated the same way, `count_tokens`'d the same way) rather than
   silently reported as free — verified against `lull_bruno` (no synopsis
-  yet): a real 208,322-token,
-  ~$1.04 synopsis call correctly reported separate from the 438-paragraph per-paragraph total. Verified end to end against `eros_magic` and `temple_gates` (both already glossed some paragraphs, so gloss_cache.json correctly excludes those): real dollar estimates for the true remainder, no crash, no network spend beyond `count_tokens` itself; a synthesized `gloss_usage.jsonl` (13 real calls, 1 truncated) correctly turned the cold-start "output cost cannot be estimated yet" message into a full priced estimate matching the input+output arithmetic by hand ($3.75
-  input + $3.60 output = $7.35); and an unpriced model
-  (`--model claude-opus-4-7`, not in `estimate.py`'s pricing table)
-  correctly abstained from a dollar figure while still reporting the real
-  total token count, the same abstain-over-guess posture as
-  `bibliography.py`'s `sniff_style` (pricing is keyed by family now, so any
-  Opus is priced; an unlisted family such as Fable still abstains).
+  yet): a real 208,322-token, roughly 1.04-dollar synopsis call correctly
+  reported separate from the 438-paragraph per-paragraph total. Verified
+  end to end against `eros_magic` and `temple_gates` (both already glossed
+  some paragraphs, so gloss_cache.json correctly excludes those): real
+  dollar estimates for the true remainder, no crash, no network spend
+  beyond `count_tokens` itself; a synthesized `gloss_usage.jsonl` (13 real
+  calls, 1 truncated) correctly turned the cold-start "output cost cannot
+  be estimated yet" message into a full priced estimate matching the
+  input+output arithmetic by hand (3.75 dollars input + 3.60 output =
+  7.35); and an unpriced model (`--model claude-opus-4-7`, not in
+  `estimate.py`'s pricing table) correctly abstained from a dollar figure
+  while still reporting the real total token count, the same
+  abstain-over-guess posture as `bibliography.py`'s `sniff_style` (pricing
+  is keyed by family now, so any Opus is priced; an unlisted family such as
+  Fable still abstains).
   `Glossator.calls`/`.gloss_input_tokens`/`.gloss_output_tokens`/
   `.gloss_truncated` baseline against the provider's own running counters
   at construction time specifically so `ensure_synopsis`'s call (made on
   the same provider instance, just before the Glossator is constructed, in
-  `lecturer.py`'s `Redact._default`) never pollutes the persisted
-  per-paragraph average — verified by constructing a `Glossator` against a
-  fake provider pre-loaded with nonzero input/output counters (simulating a
-  synopsis call that already ran) and confirming
+  `lecturer/controllers/redact.py`'s `Redact._default`) never pollutes the
+  persisted per-paragraph average — verified by constructing a `Glossator`
+  against a fake provider pre-loaded with nonzero input/output counters
+  (simulating a synopsis call that already ran) and confirming
   `gloss_input_tokens`/`gloss_output_tokens` read back only what the
   Glossator's own calls added, not the pre-existing total. A truncated call
   (the `ValidationError` path in `AnthropicProvider.ask`) still counts
@@ -762,12 +799,10 @@ Everything routine is in the `justfile`:
   `gloss_truncated` tracks it separately for `gloss_usage.jsonl` to
   disclose rather than silently under-report. Persisting these counters as
   ground truth first needed `AnthropicProvider.ask`'s `max_tokens` raised
-  from 8000 to 24000 (the one-line fix
-  `docs/planned/budget-confirmation.md` had already settled, applied here
-  since cost-estimate.md's own groundwork required trustworthy counters
-  first): a truncated call is billed by Anthropic in full but was never
-  reaching `input_tokens`/ `output_tokens` at all, so persisting
-  truncation-prone counters as-is would have baked in a silent,
+  from 8000 to 24000 (applied ahead of the estimator, which needed
+  trustworthy counters first): a truncated call is billed by Anthropic in
+  full but was never reaching `input_tokens`/ `output_tokens` at all, so
+  persisting truncation-prone counters as-is would have baked in a silent,
   one-directional undercount that gets worse the more a run truncates.
   Raising the ceiling removes the truncation class outright — free, since
   billing is by tokens actually generated, not the ceiling — rather than
@@ -775,19 +810,18 @@ Everything routine is in the `justfile`:
   would mean reaching into `anthropic.lib._parse`'s private internals to
   get at a `Message.usage` that never survives the SDK's own
   `ValidationError` unwind.
-- **`--budget`/confirmation gate on `redact --llm`**
-  (`docs/planned/budget-confirmation.md`): never let `--llm` spend anything
-  silently. `Redact._default` now computes the estimate, prints it, and
-  requires either an interactive `y` or `--yes` before any billed call; an
-  optional `--budget DOLLARS` refuses outright — never bypassed by `--yes`,
-  the two flags stay orthogonal — the moment the estimate's _known_ portion
-  alone (`Estimate.known_dollars`, a new property summing whatever's
-  actually priced: input, synopsis, output) exceeds it, but falls through
-  to the human on a cold-start book with unknown output cost rather than
-  refusing every first run unconditionally. Building this surfaced that
-  `Redact._default` was calling `ensure_synopsis` — a real billed call —
-  before the `Glossator` even existed, let alone before any estimate could
-  print; fixed by reading `synopsis.txt` off disk the way
+- **`--budget`/confirmation gate on `redact --llm`**: never let `--llm`
+  spend anything silently. `Redact._default` computes the estimate, prints
+  it, and requires either an interactive `y` or `--yes` before any billed
+  call; an optional `--budget DOLLARS` refuses outright — never bypassed by
+  `--yes`, the two flags stay orthogonal — the moment the estimate's
+  _known_ portion alone (`Estimate.known_dollars`, a new property summing
+  whatever's actually priced: input, synopsis, output) exceeds it, but
+  falls through to the human on a cold-start book with unknown output cost
+  rather than refusing every first run unconditionally. Building this
+  surfaced that `Redact._default` was calling `ensure_synopsis` — a real
+  billed call — before the `Glossator` even existed, let alone before any
+  estimate could print; fixed by reading `synopsis.txt` off disk the way
   `EstimateGloss._default` already did, gating first, then drafting for
   real only after confirmation and attaching it post-construction via a new
   `Glossator.use_synopsis` (safe late — `_key` hashes paragraph inputs
@@ -804,12 +838,18 @@ Everything routine is in the `justfile`:
   for real via `ant auth login` (no `ANTHROPIC_API_KEY` in this session):
   `redact --llm --provider openai` against `eros_magic`'s real 262-entry
   `gloss_cache.json` correctly flagged every entry stale and refused
-  non-interactively; `--budget 1` against a real
-  $5.96 estimate refused with the real numbers, unchanged by adding `--yes`; a real pty run showed the real prompt and honoured a typed `n`, exiting 1 with nothing spent. Then a real confirmed run — `redact --llm --yes --budget 10` against `ideas_and_ideals` (Yates 1984, untouched before this) — drafted its synopsis for real only after the gate passed, billed 91 paragraphs, correctly reverted 12 to verbatim on the faithfulness guard (`review.md`), left `gloss_cache.json` at exactly 79 = 91 − 12 entries, and cost $3.45
-  total — after which a follow-up `estimate-gloss` priced the remaining 12
-  from that run's own real `gloss_usage.jsonl` history instead of
-  cold-starting, confirming the full loop this spec and `estimate-gloss`
-  together describe holds end to end.
+  non-interactively; `--budget 1` against a real 5.96-dollar estimate
+  refused with the real numbers, unchanged by adding `--yes`; a real pty
+  run showed the real prompt and honoured a typed `n`, exiting 1 with
+  nothing spent. Then a real confirmed run —
+  `redact --llm --yes --budget 10` against `ideas_and_ideals` (Yates 1984,
+  untouched before this) — drafted its synopsis for real only after the
+  gate passed, billed 91 paragraphs, correctly reverted 12 to verbatim on
+  the faithfulness guard (`review.md`), left `gloss_cache.json` at exactly
+  79 = 91 − 12 entries, and cost 3.45 dollars total — after which a
+  follow-up `estimate-gloss` priced the remaining 12 from that run's own
+  real `gloss_usage.jsonl` history instead of cold-starting, confirming the
+  gate and `estimate-gloss` together hold end to end.
 - **Edge case, surfaced switching this project's own default model**:
   `gloss_cache.json` was originally scoped per exact model version —
   `Glossator._key` hashed `provider.label` alongside the paragraph and its
@@ -854,57 +894,57 @@ Everything routine is in the `justfile`:
 - **Found completing `eros_magic` for real, glossing under
   `claude-opus-4-8`**:
     - `AnthropicProvider.ask` used `messages.parse` (non-streaming); the
-      SDK refuses that
-  outright once `max_tokens` crosses ~21333 —
-  `3600s * max_tokens / 128000 > 600s`, its own fixed heuristic,
-  unconditional on how long a call actually takes — and this session's
-  earlier `max_tokens` raise (8000 → 24000, for `count_tokens`-honest usage
-  counters) crosses it. Nothing in prior testing (`count_input_tokens`, a
-  free endpoint with no such guard) made a real generation call, so this
-  only surfaced glossing a real chapter. Fixed by switching to
-  `messages.stream()` + `get_final_message()` — same `ParsedMessage` return
-  shape, same `.usage`/`.parsed_output`, verified against a real minimal
-  call before re-running.
+      SDK refuses that outright once `max_tokens` crosses ~21333 —
+      `3600s * max_tokens / 128000 > 600s`, its own fixed heuristic,
+      unconditional on how long a call actually takes — and this session's
+      earlier `max_tokens` raise (8000 → 24000, for `count_tokens`-honest
+      usage counters) crosses it. Nothing in prior testing
+      (`count_input_tokens`, a free endpoint with no such guard) made a
+      real generation call, so this only surfaced glossing a real chapter.
+      Fixed by switching to `messages.stream()` + `get_final_message()` —
+      same `ParsedMessage` return shape, same `.usage`/`.parsed_output`,
+      verified against a real minimal call before re-running.
     - The SDK's own default `max_retries` (2, for 429/5xx with backoff)
-      wasn't enough to
-  ride out two separate transient `Internal server error` 500s mid-run —
-  each required a manual re-launch. `AnthropicProvider`'s client now sets
-  `max_retries=6`: a long book is dozens of sequential calls, so more
-  headroom costs nothing on the common case.
+      wasn't enough to ride out two separate transient
+      `Internal server error` 500s mid-run — each required a manual
+      re-launch. `AnthropicProvider`'s client now sets `max_retries=6`: a
+      long book is dozens of sequential calls, so more headroom costs
+      nothing on the common case.
     - `AnthropicProvider` never tracked
       `response.usage.cache_creation_input_tokens` /
-  `cache_read_input_tokens` (both `Optional[int]`, `None` when unused) —
-  only `input_tokens`/`output_tokens`. Since a real run's cache-write/read
-  charges are a real part of the bill (1.25x/0.1x of input price), any
-  "actual cost" built from the old counters silently understated it —
-  surfaced asking how the pre-run estimate compared to what `eros_magic`
-  actually cost, and the honest answer was "can't tell you, the real number
-  was never fully captured." Added
-  `AnthropicProvider.cache_creation_input_tokens`
-  /`.cache_read_input_tokens`, `Glossator.gloss_cache_creation_tokens`/
-  `.gloss_cache_read_tokens` (baselined the same way as the other `gloss_*`
-  counters), and matching fields on `usage.UsageRecord` — defaulted to `0`
-  so the one real `gloss_usage.jsonl` record already on disk (`eros_magic`,
-  written before this fix) still parses via
-  `UsageRecord(**json.loads(line))` rather than getting silently dropped by
-  `load_usage`'s own `except (JSONDecodeError, TypeError)`.
-  `redaction/estimate.py` gained a public `price_tokens(model, ...)` — the
-  one pricing formula, shared by the module's own forward-looking estimate
-  and by `lecturer.py`'s new post-run real-cost log line, so the two can't
-  drift apart the way they just had.
+      `cache_read_input_tokens` (both `Optional[int]`, `None` when unused)
+      — only `input_tokens`/`output_tokens`. Since a real run's
+      cache-write/read charges are a real part of the bill (1.25x/0.1x of
+      input price), any "actual cost" built from the old counters silently
+      understated it — surfaced asking how the pre-run estimate compared to
+      what `eros_magic` actually cost, and the honest answer was "can't
+      tell you, the real number was never fully captured." Added
+      `AnthropicProvider.cache_creation_input_tokens`
+      /`.cache_read_input_tokens`, `Glossator.gloss_cache_creation_tokens`/
+      `.gloss_cache_read_tokens` (baselined the same way as the other
+      `gloss_*` counters), and matching fields on `usage.UsageRecord` —
+      defaulted to `0` so the one real `gloss_usage.jsonl` record already
+      on disk (`eros_magic`, written before this fix) still parses via
+      `UsageRecord(**json.loads(line))` rather than getting silently
+      dropped by `load_usage`'s own `except (JSONDecodeError, TypeError)`.
+      `redaction/estimate.py` gained a public `price_tokens(model, ...)` —
+      the one pricing formula, shared by the module's own forward-looking
+      estimate and by `lecturer/phases.py`'s post-run real-cost log line,
+      so the two can't drift apart the way they just had.
     - A `ProviderError` mid-run (either of the two 500s above) unwinds past
-  `_redact_phase`'s `append_usage(...)` call entirely — real billed calls a
-  crashed run already made (and already cached, so not re-billed) were
-  simply never recorded in `gloss_usage.jsonl`, silently shrinking the
-  sample a later `estimate-gloss` extrapolates from. `_redact_phase`
-  extracted a `_persist_gloss_usage(app, directory, weaver)` helper, called
-  from both the success path and the `except ProviderError` branch — a
-  Glossator's own counters survive the exception unwind (the object itself
-  isn't destroyed), so whatever it billed before the failure is still
-  readable and gets persisted either way. Verified with a synthetic
-  provider whose second call raises mid-script: the first call's real
-  tokens (cache tokens included) land in `gloss_usage.jsonl` even though
-  the overall `redact()` call raises.
+      `_redact_phase`'s `append_usage(...)` call entirely — real billed
+      calls a crashed run already made (and already cached, so not
+      re-billed) were simply never recorded in `gloss_usage.jsonl`,
+      silently shrinking the sample a later `estimate-gloss` extrapolates
+      from. `_redact_phase` extracted a
+      `_persist_gloss_usage(app, directory, weaver)` helper, called from
+      both the success path and the `except ProviderError` branch — a
+      Glossator's own counters survive the exception unwind (the object
+      itself isn't destroyed), so whatever it billed before the failure is
+      still readable and gets persisted either way. Verified with a
+      synthetic provider whose second call raises mid-script: the first
+      call's real tokens (cache tokens included) land in
+      `gloss_usage.jsonl` even though the overall `redact()` call raises.
 
 Use `uv` for all dependency management (`uv add`, `uv add --dev`), never
 pip. direnv activates the venv; `.envrc` runs `uv sync` on entry.
@@ -917,3 +957,21 @@ pip. direnv activates the venv; `.envrc` runs `uv sync` on entry.
   anywhere), point it out rather than propagating it into code.
 - Ruff handles formatting and linting; config lives in `pyproject.toml`
   (line length 100, py313).
+
+## Pending
+
+`STATUS.md` is the record of what is open and why; keep it current in
+the same commit as the change that opens or closes an item.
+
+Scoped work not yet started lives in `docs/planned/`, one self-contained
+spec per file, deleted once it's settled:
+
+- `pytest-suite.md` — no `tests/` directory yet. CLI smoke tests standing
+  in for what is currently checked by hand (`--help` for the app and all 8
+  verbs, plus real `estimate-gloss` and `extract` dry runs against an
+  existing work dir), and unit tests for `lecturer.workdir.prepare_workdir`
+  and `_reconcile` (directory creation, the `working_text` symlink).
+  End-to-end tests (redact/recite/publish) are out of scope until a real
+  copyleft-licensed document turns up to run through the full chain.
+- `shared-canon.md` — a cross-person citation canon beyond
+  `canon.py`'s per-machine tier 1.

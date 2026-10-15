@@ -81,15 +81,18 @@ terminal.
 ## Usage
 
 ```text
-lecturer -o eros_magic "texts/Ioan P. Couliano - Eros and Magic in the Renaissance.epub"
+lecturer extract -o eros_magic "texts/Ioan P. Couliano - Eros and Magic in the Renaissance.epub"
+lecturer -o eros_magic
 ```
 
 This creates `./eros_magic/`, copies the document in, links `working_text`
 to the copy, and extracts the text into `./eros_magic/sections/` — one file
 per section, with a matching `.footnotes.txt` beside it. Every later
-artefact lands in the same directory.
+artefact lands in the same directory; the bare second command runs the
+rest of the chain, through publishing, with default settings.
 
 The phases are verbs — `extract`, `redact`, `recite`, `publish`, plus
+`estimate-gloss` to price a glossing run before paying for it, and
 `draft-lexicon` and `draft-classical`/`promote-classical` for the canon.
 Verbs resolve their own dependencies; glossing never runs implicitly.
 
@@ -106,10 +109,11 @@ Known gaps, all deliberate rather than undiscovered:
   candidate chosen; it isn't wired in.
 - The bibliography heading pattern is English-only, so a non-English
   heading yields a correct section but no parsed structure.
-- Bekker numbering and Diels-Kranz are further closed citation systems of
-  the same shape as the implemented ones, waiting on a forcing case.
+- Bekker numbering is a further closed citation system of the same
+  shape as the implemented ones, waiting on a forcing case.
 
-`docs/` carries the design notes; `CLAUDE.md` carries the full
+`STATUS.md` tracks what is hardened, what is open, and what stays open
+on purpose. `docs/` carries the design notes; `CLAUDE.md` carries the full
 architecture, including why each of the above is where it is.
 
 ## Development

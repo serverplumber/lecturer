@@ -1,8 +1,8 @@
 # Spec: shared citation canon
 
 Status: not started, scoped only. No dependencies on other open specs
-(`docs/planned/` is otherwise empty). Written for handoff to a fresh
-session — self-contained.
+(`docs/planned/` otherwise holds only `pytest-suite.md`, unrelated).
+Written for handoff to a fresh session — self-contained.
 
 ## Purpose
 
