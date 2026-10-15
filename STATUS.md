@@ -14,7 +14,7 @@ the reason it stays.
 
 ## Hardened
 
-As of `504004e`. Every item was found on a real run against a real book,
+As of `453df1c`. Every item was found on a real run against a real book,
 not in a synthetic test.
 
 - **Streaming, not `.parse()`.** Raising `max_tokens` to 24000 crossed the
@@ -42,9 +42,28 @@ not in a synthetic test.
   by `--yes`. The synopsis draft (itself a billed call) moved behind the
   gate. On providers with no free token count, `--budget` errors rather
   than silently checking nothing.
-- **Stale cache warning.** The gloss cache is keyed by model, so a
-  default-model bump orphaned 145 real entries. Now counted and reported
-  before any billed call.
+- **Caches survive a model release.** The gloss cache was keyed by exact
+  model version, so a default-model bump orphaned 145 real entries.
+  Defaults now name a family (`claude-opus`, `claude-haiku`) resolved to
+  its newest release, and the gloss and tongue caches are keyed by family;
+  entries under an older version label move to the family key on first
+  lookup instead of being re-billed. A different family still starts
+  fresh, and orphaned entries are still counted and reported before any
+  billed call.
+- **Glued footnote anchors.** Some EPUB markup keeps the word space inside
+  the anchor (`Bogomils<sup>37 </sup>into`); replacing the anchor
+  wholesale glued the words, and the faithfulness check then rejected the
+  model's correctly spaced text. The space is now re-emitted after the
+  marker. This was 19 of `eros_magic`'s 77 rejects.
+- **Rejected responses kept.** A response the faithfulness check rejects
+  was discarded, losing a billed call with no way to judge it. Now kept in
+  `gloss_rejects.json`, never read back as a cache, so a retry still
+  happens; when the check later accepts a kept response it is replayed
+  into the cache with no call made.
+- **Whitespace-blind faithfulness.** Every reject traced to a cause was a
+  one-space difference at an anchor where the model's spacing was right.
+  The check now compares letter for letter with whitespace ignored;
+  paraphrase, reordering and dropped text still fail.
 - **Feature probing over model lists.** Adaptive thinking is tried and
   dropped on the specific 400 a model without it returns, rather than kept
   in a list that goes stale.
@@ -54,7 +73,7 @@ not in a synthetic test.
 
 ## Open
 
-As of `504004e`.
+As of `453df1c`.
 
 ### No test suite
 
@@ -114,6 +133,48 @@ text layer and is the candidate.
 _Art of Memory_ and _Lull and Bruno_ are genuine blobs; Williams'
 _Rethinking Gnosticism_ has a text layer but no outline, which is exactly
 Marker's fit. Wiring it in is the remaining work.
+
+Kingsley's "Empedocles for the New Millennium" is a near miss with a
+different cause: it has a real note size and its note text parses, but
+OCR errors in the superscript digits leave only 37% of notes paired,
+under `_pairing_holds`'s 50% floor, so every footnote is still discarded.
+
+### Endnotes chapters aren't recovered from PDFs or every EPUB
+
+**Gap.** `extraction/pdf.py` only pairs per-page footnotes. _Tree of
+Gnosis_ (bare-digit endnote markers, no separable Notes section detected)
+and _Out of This World_ (OCR-corrupted besides) recover 0 footnotes. The
+Italian EPUB _I miti dei dualismi occidentali_ also extracts 0, re-checked
+2026-10-07; whether that's a markup gap or a genuine absence is
+unexplored.
+
+**Why it exists.** `extraction/endnotes.py` covers the EPUB endnotes
+chapter shape seen so far; no PDF has needed it yet.
+
+**Trigger.** Two books are already blocked on it; building it unblocks
+both at once. _Tree of Gnosis_ is also the only corpus for the second
+bibliography style (`docs/bibliography-styles.md`).
+
+### Assumptions behind family-keyed pricing
+
+**Gap.** Pricing and the cache minimum are keyed by model family, on the
+assumption that a family's prices hold across versions. Opus 5.5's real
+prompt-cache minimum is unmeasured; Opus 5's 512 tokens is assumed.
+
+**Closing it.** Check both against the published pricing and one real
+billed call's cache-write count.
+
+**Trigger.** The next real `redact --llm` run, or a price change.
+
+### Rejects with no visible cause
+
+**Gap.** Under Opus 5, 55 paragraphs failed the faithfulness check with
+no visible cause, and 3 more at a dash or bracket glued in the book
+itself. All of them passed under Opus 5.5, so `gloss_rejects.json` is
+empty and what failed is unknown rather than fixed.
+
+**Trigger.** A reject that recurs; it will be kept with its response
+this time.
 
 ### Patristic sigla collide with Stephanus
 
