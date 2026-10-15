@@ -956,7 +956,8 @@ pip. direnv activates the venv; `.envrc` runs `uv sync` on entry.
 - If the user makes a spelling mistake or typo (in prose, identifiers,
   anywhere), point it out rather than propagating it into code.
 - Ruff handles formatting and linting; config lives in `pyproject.toml`
-  (line length 100, py313).
+  (line length 100, py313). ty type-checks the whole project on its
+  defaults — no config section — and both run in the commit hooks.
 
 ## Pending
 
