@@ -11,7 +11,7 @@ increasing order of control:
   (the per-word cousin of the transliteration -> Italian rule).
 - ``ipa``: exact phonemes, for the stubborn cases.
 
-Entries are drafted by a cheap LLM sweep (``--lexicon-draft``) and edited
+Entries are drafted by a cheap LLM sweep (the ``draft-lexicon`` verb) and edited
 by the listener's ear; matching is deterministic — whole words, longest
 entry first, case-sensitive. Keys starting with ``_`` are ignored, and a
 ``count`` field inside an entry is bookkeeping from the draft, not

@@ -14,7 +14,7 @@ the reason it stays.
 
 ## Hardened
 
-As of `453df1c`. Every item was found on a real run against a real book,
+As of `453df1c`. Most items were found on a real run against a real book,
 not in a synthetic test.
 
 - **Streaming, not `.parse()`.** Raising `max_tokens` to 24000 crossed the
@@ -166,7 +166,7 @@ billed call's cache-write count.
 
 **Trigger.** The next real `redact --llm` run, or a price change.
 
-### Rejects with no visible cause
+### Opus 5 rejects whose cause was never found
 
 **Gap.** Under Opus 5, 55 paragraphs failed the faithfulness check with
 no visible cause, and 3 more at a dash or bracket glued in the book

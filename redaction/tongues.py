@@ -6,8 +6,8 @@ Greek, Hebrew, and their neighbours are found without any guessing. The
 script-to-language mapping assumes a scholarly corpus — Greek script is
 read as Ancient Greek, not Modern. Switches that stay within the Latin
 alphabet (German and French titles in citations, Latin proper) are left
-untagged: telling those apart takes judgement, which is the planned LLM
-layer's business.
+untagged: telling those apart takes judgement, which is
+``TongueInterpreter``'s business (``redaction/interpret.py``, ``--interpret``).
 
 An utterance carries one language, so tagging splits utterances at script
 boundaries; connectors (spaces, commas, dashes) between two runs of the

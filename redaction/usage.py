@@ -6,8 +6,7 @@ is what makes ``redaction/estimate.py``'s per-paragraph output average
 honest: without a durable record of real spend, there is no ground truth to
 extrapolate output cost from — the input half alone is estimable from
 ``count_tokens`` (free), but nothing plays that role for output tokens
-(including thinking, which Anthropic bills as output). See
-docs/planned/cost-estimate.md.
+(including thinking, which Anthropic bills as output).
 """
 
 import json

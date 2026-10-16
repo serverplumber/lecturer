@@ -366,7 +366,7 @@ class Glossator:
         or this file's own weaving pipeline would also orphan entries, so a
         nonzero count here isn't proof of a model change specifically — but
         it's the single most likely cause, and cheap to check. See
-        CLAUDE.md's Glossator section for how this was found (a real ~145
+        CLAUDE.md's "Glossing cost and caching" section for how this was found (a real ~145
         entries orphaned in a real work dir's gloss_cache.json switching
         this project's own default model mid-book) and confirmed.
         """
@@ -480,7 +480,7 @@ def _faithful(woven: WovenParagraph, paragraph: str) -> bool:
     Whitespace doesn't count because a listener only hears it as word
     boundaries, and every reject traced to it was the model repairing a
     boundary the source had broken — a space lost at a note anchor, in
-    extraction or in the book itself (docs/planned/whitespace-faithfulness.md).
+    extraction or in the book itself.
     """
     source = _letters(ANCHOR.sub("", paragraph))
     bodies = "".join(_letters(piece.text) for piece in woven.pieces if piece.manner == "body")

@@ -16,7 +16,7 @@ enumerable ones (``biblical.py``, ``stephanus.py``, ``diels_kranz.py``,
 and in time Bekker) get a hardcoded table like this module's default
 locator; open ones — classical author-work abbreviations, unit systems —
 get a hand-editable, LLM-drafted map instead, additive and
-never-overwriting, on the lexicon-draft pattern. A third shape has no
+never-overwriting, on the ``draft-lexicon`` pattern. A third shape has no
 table at all: ``PatternSystem`` (``qumran.py``) matches a generative
 citation shape and computes its spoken form by parsing the match, for
 vocabularies too large to enumerate.

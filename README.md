@@ -67,8 +67,8 @@ work whose output can be checked, and nothing else.
   of spans that look like citations but didn't convert, with enough
   surrounding context to read the cause off the text.
 
-The practical result is output you can diff between runs, hold to a
-regression suite, and hand to someone who has to trust it without reading
+The practical result is output you can diff between runs and hand to
+someone who has to trust it without reading
 the source.
 
 ## Who it's for
@@ -102,19 +102,9 @@ Working and verified against real corpora, not synthetic fixtures.
 Extraction, redaction, and recitation run end to end; several books have
 been taken all the way to a tagged `.m4b`.
 
-Known gaps, all deliberate rather than undiscovered:
-
-- Scanned PDFs with no text layer, no outline, and no font-size profile
-  have no extractor path. Upstream layout tools have been evaluated and a
-  candidate chosen; it isn't wired in.
-- The bibliography heading pattern is English-only, so a non-English
-  heading yields a correct section but no parsed structure.
-- Bekker numbering is a further closed citation system of the same
-  shape as the implemented ones, waiting on a forcing case.
-
-`STATUS.md` tracks what is hardened, what is open, and what stays open
-on purpose. `docs/` carries the design notes; `CLAUDE.md` carries the full
-architecture, including why each of the above is where it is.
+Known gaps are tracked in `STATUS.md`: what is hardened, what is open,
+and what stays open on purpose, each with the reason. `docs/` carries the
+design notes; `CLAUDE.md` carries the full architecture.
 
 ## Development
 

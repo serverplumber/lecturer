@@ -123,10 +123,10 @@ class Redact(Controller):
                     proceed = self._confirm_spend(estimate)
                 else:
                     # count_tokens (and so estimate_gloss_cost) is Anthropic-only — no
-                    # identically-named free endpoint exists for OpenAI/local models
-                    # (see docs/planned/cost-estimate.md's own scoping). The gate still
-                    # runs, just without a priced estimate to gate on; --budget can't be
-                    # honoured here, so it errors out rather than silently not applying.
+                    # identically-named free endpoint exists for OpenAI/local models.
+                    # The gate still runs, just without a priced estimate to gate on;
+                    # --budget can't be honoured here, so it errors out rather than
+                    # silently not applying.
                     if self.app.pargs.budget is not None:
                         self.app.log.error(
                             "--budget needs --provider anthropic — there's no free "
@@ -159,7 +159,7 @@ class Redact(Controller):
         _redact_phase(self.app, directory, extraction, weaver=weaver, interpreter=interpreter)
 
     def _confirm_spend(self, estimate) -> bool:
-        """Gate before any billed --llm call — see docs/planned/budget-confirmation.md.
+        """Gate before any billed --llm call.
 
         ``--budget`` is a hard ceiling checked first and never bypassed by
         ``--yes``: the two stay orthogonal, ``--yes`` only ever answers the

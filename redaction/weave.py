@@ -2,9 +2,9 @@
 
 The deterministic baseline: each note is spoken, verbatim, where the
 sentence carrying its anchor ends, and the ``[^ref]`` markers disappear
-from the body text. The planned LLM layer will instead judge which notes
-deserve airtime and rephrase them as asides; until then every note is
-read as written. Notes whose anchor never appears stay on the section's
+from the body text. Every note is read as written; ``Glossator``
+(``redaction/gloss.py``) is the LLM counterpart that judges which notes
+deserve airtime and respeaks them as asides. Notes whose anchor never appears stay on the section's
 ``footnotes`` list so nothing is silently dropped.
 """
 

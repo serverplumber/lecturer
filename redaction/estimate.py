@@ -1,12 +1,11 @@
-"""Pre-flight cost estimate for `redact --llm` — see docs/planned/cost-estimate.md.
+"""Pre-flight cost estimate for `redact --llm`.
 
 Computes what the remaining glossing work would cost without spending
 anything: input tokens come from ``count_tokens`` (a free endpoint), output
 tokens are extrapolated from this book's own persisted call history
 (``gloss_usage.jsonl``, written by ``lecturer.phases`` after a real run). Scoped
 to the Anthropic provider for v1 — OpenAI has different pricing and no
-identically-named free token-counting endpoint (non-goal, tracked as future
-work in the spec).
+identically-named free token-counting endpoint.
 """
 
 from dataclasses import dataclass, field
@@ -76,7 +75,7 @@ def price_tokens(
     by ``lecturer.phases``' post-run real-cost report (built from
     ``AnthropicProvider``'s real usage counters, cache tokens included) —
     keeping the two from drifting apart the way the estimate's own input
-    figure and a run's real reported cost once did (see CLAUDE.md).
+    figure and a run's real reported cost once did (see CLAUDE.md's "Glossing cost and caching").
     """
     pricing = _PRICING.get(model_family(model))
     if pricing is None:
@@ -139,7 +138,7 @@ def check_budget(estimate: Estimate, budget: float) -> str | None:
     """``None`` if ``estimate`` fits ``budget`` (or can't be checked at all).
 
     A refusal message otherwise, for the caller to print and abort on
-    without spending anything — see docs/planned/budget-confirmation.md.
+    without spending anything.
     Deliberately checks only the *known* portion of the cost
     (``Estimate.known_dollars``): refusing outright the moment any priced
     part alone exceeds the ceiling, but never refusing on an unpriced
