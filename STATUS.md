@@ -73,7 +73,149 @@ not in a synthetic test.
 
 ## Open
 
-As of `453df1c`.
+As of `4158dd0`. The first ten entries came out of a code review on
+2026-10-15; each was reproduced or measured on the real corpus, not
+reasoned about alone, except where an entry says otherwise.
+
+### The shared canon speaks Cicero's "Leg." as Philo's
+
+**Gap.** Tier 1 (`elocution/classical_sigla.toml`) maps "Leg." to "On the
+Embassy to Gaius". Classical runs first in `default_systems()`, so every
+book on this machine now speaks "Cicero, Leg. 2.22.9" as "Cicero, On the
+Embassy to Gaius two, twenty-two, nine". `philo.py` leaves "Leg" out on
+purpose, because this corpus cites three different works under it.
+
+**Why it exists.** `draft.py`'s `_known_sigla` compares sigla as exact
+strings, so "Leg." didn't count as known against philo's and Stephanus's
+"Leg", and `collisions()` couldn't see the ambiguity because Cicero isn't a
+confirmed bibliography author. All five tier-1 collisions with other
+systems are trailing-period variants; the other four ("Ant.", "Abr.",
+"C. Ap.", "Spec. Leg.") mean the same work and are harmless.
+
+**Closing it.** Remove "Leg." from tier 1; compare sigla with a trailing
+period ignored; give a system a way to mark a siglum as deliberately
+unresolved, so a draft can't fill it in.
+
+**Trigger.** Now; it is wrong in every book that cites "Leg.".
+
+### `promote-classical` can't promote one entry
+
+**Gap.** `canon.py`'s `promote` copies every resolved tier-2 entry at
+once. `docs/classical-sigla.md` says a document-specific correction can
+stay in tier 2 forever, but nothing lets it: promoting anything promotes
+everything. This is how "Leg." reached tier 1.
+
+**Closing it.** Promote named sigla, or let a tier-2 entry opt out.
+
+**Trigger.** Now; the next promote repeats the problem.
+
+### Phantom PDF notes from a relaxed note-start pattern
+
+**Gap.** `_NOTE_START` accepts "N text" as well as "N. text" since
+3058347 (for Kingsley's article). A wrapped note line that begins with a
+volume or page number now opens a new note: `temple_gates` has about 20
+out-of-sequence notes such as `n292` ("(Tübingen: Mohr Siebeck, 2012)…")
+and `n230` ("n. 11; Ronald F. Hock…"). Each truncates the real note it
+was torn from, and the phantom never pairs with an anchor.
+
+**Why it exists.** The change was verified on Kingsley alone, not against
+the corpus it could regress.
+
+**Closing it.** Accept a period-less number only when it continues the
+page's note sequence, or only when the document never uses "N.".
+
+**Trigger.** Now; `temple_gates` is the validated corpus.
+
+### A citation list swallows the next book's numeral
+
+**Gap.** `_merge`'s continuation group takes any number after "; " or ", "
+as another locator for the same siglum, so "Rom 8:28; 1 Cor 2:9" is spoken
+as "Romans eight, twenty-eight; one Cor 2:9". About 15 occurrences in
+`temple_gates`' Pauline citation lists.
+
+**Closing it.** Don't continue onto a number that a numbered siglum
+("1 Cor", "2 Kgs", ...) immediately follows.
+
+**Trigger.** Now.
+
+### Replacing a work dir's book keeps the old book's state
+
+**Gap.** `_reconcile` clears `sections/`, `redactions/` and `audio/` but
+keeps `synopsis.txt` (never regenerated while it exists, so the new book is
+glossed with the old book's synopsis as context), the tier-2
+`classical_sigla.toml`, and `gloss_usage.jsonl` (which would skew the new
+book's output estimate). The prompt names only "caches and lexicon.json",
+and the docstring says these survive "only for the same book".
+
+**Closing it.** Clear or move aside every per-book file on a book change;
+keep only what is keyed by content.
+
+**Trigger.** The next time a work dir is reused for another book.
+
+### Files from an earlier extraction are never removed
+
+**Gap.** `write_sections` and `write_redactions` write the current files
+and leave older ones in place, and `read_redactions` reads every `*.txt`.
+`temple_gates/sections/09_bibliography.footnotes.txt` is from 07-14, every
+other file from 08-16. If section splitting changes, recitation reads the
+stale sections alongside the new ones.
+
+**Closing it.** Clear the directory, or the stems not written this run,
+before writing.
+
+**Trigger.** The next extractor change that moves a section boundary.
+
+### espeak language-switch markers may be spoken
+
+**Gap.** On a mixed-script word espeak emits `(en)…(el)` into the phoneme
+string, and kokoro-onnx's vocab filter keeps `(`, `e`, `n` and `)`. 3 of
+329 Greek utterances in the corpus have Latin lookalike letters
+(`γοήtες`, `τõυ θεοῦ`, both in `temple_gates`), which `LanguageTagger`
+keeps inside the Greek run on purpose. French with an English loanword and
+lexicon `lang` entries of `he` or `ar` do the same.
+
+**Not verified by ear.** The phoneme strings were checked; the audio was
+not, and no listening so far has noticed it. It may be inaudible.
+
+**Closing it.** Listen to the two `temple_gates` cases first. If audible,
+map lookalikes to Greek inside a Greek run and strip markers before
+synthesis.
+
+**Trigger.** A listen.
+
+### `TongueInterpreter` splits words mid-word
+
+**Gap.** `_locate` uses `text.find()` with no word boundary: tagging "et"
+splits "The beta version" into "The b" | "et" | "a version". A phrase that
+occurs twice in one stretch is tagged only the first time.
+
+**Closing it.** Match on word boundaries, every occurrence.
+
+**Trigger.** The next `--interpret` run.
+
+### Some EPUB footnotes vanish without a trace
+
+**Gap.** A note attaches only to a leaf section whose text carries its
+marker; front and back matter take none, and an unanchored note doesn't
+reach `.unwoven.txt` either. 1 note is lost in _Eros and Magic_ and 4 in
+Harnack vol. 1, with nothing reported.
+
+**Closing it.** Give front/back matter their notes, and put unplaced notes
+somewhere a human will see them.
+
+**Trigger.** Now; it contradicts "nothing is silently dropped".
+
+### Spend that never reaches the usage record
+
+**Gap.** `_redact_phase` catches only `ProviderError`, so a Ctrl-C during
+a long `redact --llm` drops every billed call from `gloss_usage.jsonl`.
+The synopsis draft is billed but never recorded or included in the
+post-run cost line (about $1 on `lull_bruno`).
+
+**Closing it.** Persist usage in a `finally`; record the synopsis call as
+its own usage record.
+
+**Trigger.** Now; same class as "Usage survives a crash".
 
 ### No test suite
 
@@ -98,7 +240,10 @@ hand-written excerpts.
 cache is written in place rather than via `.part` and rename; its calls and
 tokens aren't counted or persisted; a batch with no usable answer returns
 nothing and is not reported, where a failed gloss is reported in
-`review.md`.
+`review.md`. `--interpret` and `draft-lexicon` both spend without the
+estimate-and-confirm gate `redact --llm` has, and `draft-lexicon` writes
+`lexicon.json` only at the end, so a crash mid-sweep loses everything
+already billed.
 
 **Why it exists.** The glossator is the expensive layer and was hardened
 first; the interpreter runs on the cheap tier.
@@ -145,8 +290,11 @@ under `_pairing_holds`'s 50% floor, so every footnote is still discarded.
 Gnosis_ (bare-digit endnote markers, no separable Notes section detected)
 and _Out of This World_ (OCR-corrupted besides) recover 0 footnotes. The
 Italian EPUB _I miti dei dualismi occidentali_ also extracts 0, re-checked
-2026-10-07; whether that's a markup gap or a genuine absence is
-unexplored.
+2026-10-07, as do Yates' _Giordano Bruno and the Hermetic Tradition_ and
+the Hazlitt EPUB; whether each is a markup gap or a genuine absence is
+unexplored. Separately, a PDF note continued over two page breaks loses its
+third page to body text: continuation is checked against the page the note
+started on, not the last page it reached.
 
 **Why it exists.** `extraction/endnotes.py` covers the EPUB endnotes
 chapter shape seen so far; no PDF has needed it yet.
@@ -182,12 +330,23 @@ this time.
 Tertullian; Philo, Cicero) lose to Plato's identically spelled Stephanus
 sigla under the priority tie-break. Citation review reports 21 such spans
 in `temple_gates`; none was found mis-spoken as Plato, but that check was
-by hand.
+by hand. Since tier 1 gained "Leg.", those spans no longer reach review:
+they convert, some of them wrongly (see the first Open entry).
 
 **Closing it.** The `patristic_sigla` system planned in
 `docs/elocution.md`.
 
 **Trigger.** Evidenced in one corpus already.
+
+### Smaller
+
+- **Elocutor is slow:** about 30 ms per paragraph, a minute per book, since
+  the 299-branch merged pattern runs twice per utterance.
+- **The Kokoro model download isn't checksummed** (`kokoro.py`'s `_fetch`),
+  at odds with hermetic builds.
+- **A blank line inside an utterance breaks the redactions round trip:**
+  the untagged second half is dropped on read. Latent — none of 470 real
+  cached glosses contains a newline.
 
 ---
 
